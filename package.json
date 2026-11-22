@@ -1,0 +1,14 @@
+{
+  "name": "tetherbench",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node apps/gateway/server.mjs",
+    "simulate": "node apps/simulator/probe.mjs",
+    "test": "node --test",
+    "check": "node --check apps/gateway/server.mjs && node --check apps/simulator/probe.mjs && node --check apps/console/app.js && node --test"
+  }
+}

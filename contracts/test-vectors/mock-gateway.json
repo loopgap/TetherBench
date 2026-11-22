@@ -1,0 +1,10 @@
+{
+  "device": {
+    "id": "vector-probe-01",
+    "name": "Vector probe",
+    "capabilities": ["cmsis-dap", "uart"]
+  },
+  "exchange": {
+    "data": "串口 mock"
+  }
+}

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f7f6">
+    <title>TetherBench</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">TB</span>
+        <div>
+          <h1>TetherBench</h1>
+          <p>Embedded probe workspace</p>
+        </div>
+      </div>
+      <div class="service-state">
+        <span class="state-dot" id="service-dot" aria-hidden="true"></span>
+        <span id="service-label" role="status" aria-live="polite">Connecting</span>
+        <span class="version" id="project-version">Loading version</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="page-heading" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">LOCAL PROTOTYPE</p>
+          <h2 id="page-title">Probe inventory</h2>
+          <p class="subheading">Connected probes and their active debug sessions</p>
+        </div>
+        <div class="toolbar">
+          <button class="button button-secondary" id="refresh-button" type="button">Refresh</button>
+          <button class="button button-primary" id="connect-button" type="button">Add browser test probe</button>
+        </div>
+      </section>
+
+      <section class="inventory" aria-labelledby="inventory-title">
+        <div class="section-heading">
+          <div>
+            <h3 id="inventory-title">Devices</h3>
+            <p id="device-count">0 connected</p>
+          </div>
+          <span class="table-hint">Simulation only</span>
+        </div>
+        <div class="device-list" id="device-list" aria-live="polite">
+          <p class="empty-state">No probes connected.</p>
+        </div>
+      </section>
+
+      <section class="session-panel" aria-labelledby="session-title">
+        <div class="session-heading">
+          <div>
+            <p class="eyebrow">DEBUG RESOURCE</p>
+            <h3 id="session-title">Session workspace</h3>
+          </div>
+          <span id="session-state" class="session-state">No active session</span>
+        </div>
+
+        <div class="session-content">
+          <div class="selected-device">
+            <span class="field-label">Selected probe</span>
+            <strong id="selected-name">Select a device</strong>
+            <span id="selected-id" class="muted">No device selected</span>
+          </div>
+          <div class="session-actions">
+            <button class="button button-secondary" id="acquire-button" type="button" disabled>Acquire session</button>
+            <button class="button button-secondary" id="release-button" type="button" disabled>Release session</button>
+            <button class="button button-danger" id="disconnect-button" type="button" disabled>Disconnect probe</button>
+          </div>
+          <form id="exchange-form" class="exchange-form">
+            <label for="exchange-data">Test payload</label>
+            <div class="exchange-controls">
+              <input id="exchange-data" name="data" maxlength="4096" value="probe status" autocomplete="off">
+              <button class="button button-primary" id="exchange-button" type="submit" disabled>Exchange</button>
+            </div>
+            <p class="muted">The prototype echoes up to 4096 UTF-8 bytes; this is not CMSIS-DAP traffic.</p>
+          </form>
+          <pre class="exchange-result" id="exchange-result" aria-live="polite">No data exchanged.</pre>
+        </div>
+      </section>
+
+      <p class="notice" role="note">This unauthenticated prototype is bound to this computer only. It does not control hardware and must not be exposed to a network.</p>
+      <div class="announcer" id="announcer" role="status" aria-live="polite"></div>
+    </main>
+  </body>
+</html>
