@@ -1,12 +1,30 @@
 # Probe C5
 
-This is a minimal ESP-IDF C/C++ build skeleton, not a probe implementation. It has no board pin map, Wi-Fi configuration, CMSIS-DAP engine, target power control, or OTA code.
+共享 ESP32-C5 N4 固件使用 ESP-IDF 6.1.1 独立构建，版本读取根目录 `VERSION`。已实现 TLS 二进制 RPC、UDP 发现、独占租约、可配置 SWD/UART/SPI/I2C、官方 Arm CMSIS-DAP 核心及签名双槽 OTA。双频状态机已有实现；自动双方测量、外部 MCU 更新适配和虚拟 USB 尚未完成。
 
-Activate an ESP-IDF v6.1.1 environment with ESP32-C5 support, then run:
+跨工程入口：[C5 契约](../../contracts/probe-c5.md)。详细字段和恢复行为：[协议](docs/protocol.md)。验证结果：[验收记录](docs/validation.md)。第三方版本及补丁：[CMSIS-DAP 来源](third_party/CMSIS-DAP/UPSTREAM.md)。
+
+`main/` 存放固件；`tools/` 和 `tests/` 存放本工程工具与回归；`docs/` 存放 C5 详细文档。`.local/` 的凭据、私钥、Flash 备份和本机配置，以及 `build/` 的编译输出均不提交。N4 只表示 4 MiB Flash，没有确认具体开发板外部电路；默认不分配目标引脚。
+
+先读取并启动 Windows 已配置的热点，再生成本机凭据和构建。WinRT 热点脚本需要 Windows PowerShell 5；路径是 2026-11-26 本机确认值，其他机器通过脚本参数指定环境：
 
 ```powershell
-idf.py set-target esp32c5
-idf.py build
+powershell.exe -NoProfile -File firmware/probe-c5/tools/windows_hotspot.ps1 -Start
+& 'C:/Espressif/tools/python/v6.1.1/venv/Scripts/python.exe' firmware/probe-c5/tools/provision.py
+& firmware/probe-c5/tools/build.ps1
 ```
 
-The project intentionally keeps C `probe.c` separate from the C++ `app_main.cpp`; the public C function has explicit C linkage. No SDK was installed for this initialization, so compilation remains unverified. Add board pins and components only after the actual probe board is identified.
+`provision.py --ap` 配置此 C5 为 AP；默认 STA。两者读取 `.local/wifi.json`，不打印网络密码。STA 必须实际协商 HE20，否则断开并退避重连。热点已经启动不代表它支持 Wi-Fi 6。客户端在发送令牌前核对预置的完整 DER 证书，发现报文不能建立信任。每台板卡应使用独立密钥和配置。
+
+首次烧录前确认芯片身份并备份完整 Flash。构建脚本的 `-Flash -Port COM7` 会烧录；本机已备份 4194304 字节至 `.local/original-flash.bin`。分区表保留原 NVS 的 `0x9000/0x6000` 边界。
+
+```powershell
+$env:CC='D:/mingw64/bin/gcc.exe'
+& 'C:/Espressif/tools/python/v6.1.1/venv/Scripts/python.exe' firmware/probe-c5/tools/test_core.py
+& 'C:/Espressif/tools/python/v6.1.1/venv/Scripts/python.exe' -m unittest discover -s firmware/probe-c5/tests -p 'test_*.py' -v
+npm run check
+& 'C:/Espressif/tools/python/v6.1.1/venv/Scripts/python.exe' firmware/probe-c5/tools/client.py discover
+& 'C:/Espressif/tools/python/v6.1.1/venv/Scripts/python.exe' firmware/probe-c5/tools/hil.py --host <设备地址>
+```
+
+真机检查工具不分配目标脚。SWD 实际波形、总线电气质量、OTA 掉电和双 C5 切频仍需对应实验。其他芯片的 QEMU 结果不能证明 C5 硬件行为。当前没有启用不可逆 eFuse 配置；应用层签名更新不替代量产安全启动、防物理读出和防降级。

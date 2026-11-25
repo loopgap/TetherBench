@@ -1,0 +1,145 @@
+# Probe C5 协议版本 1
+
+日期：2026-11-26。已有源码实现；真实验证范围见 [验收记录](validation.md)。所有多字节整数均为小端，字节偏移从 0 开始。协议字段有定义不等于所有硬件适配已经验证。
+
+## 传输和设备身份
+
+HTTPS TCP 443，`POST /v1/rpc`，请求与响应 `Content-Type: application/octet-stream`。请求头 `Authorization: Bearer ` 后恰好 64 个十六进制字符。身份失败 HTTP 401；帧、长度或 Content-Type 错误 HTTP 400，关闭连接。调用方不能跟随重定向发送令牌。
+
+设备使用本机生成的 P-256 证书。Python 客户端先比较预置 PEM 对应的完整 DER 证书，成功后才发送 HTTP 请求；禁止 HTTP 库隐式重连，每个新 TLS 连接都重新验证。发现回复里的证书摘要只能提供提示，不能自动配对。证书轮换需要受信任的本机配置更新。
+
+最多两个 TLS socket；单 HTTP 任务顺序执行。握手期限 5 秒，收发等待 2 秒，请求体总读取期限约 5 秒。固定请求、响应和最近事务缓冲，没有无限任务队列。局域网攻击者仍可占用连接资源，不能承诺消除无线拒绝服务。
+
+| 帧偏移 | 字节数 | 内容 |
+|---|---:|---|
+| 0 | 4 | ASCII `TBC5` |
+| 4 | 1 | 版本 1 |
+| 5 | 1 | opcode |
+| 6 | 2 | 请求 0；响应 `0x8000 OR status` |
+| 8 | 4 | request_id，原样回传 |
+| 12 | 4 | payload_length，0..4096 |
+| 16 | 8 | lease，原样回传；新租约放 ACQUIRE 响应负载 |
+| 24 | 可变 | 负载，HTTP body 必须恰好含一帧 |
+
+| status | 名称与恢复依据 |
+|---:|---|
+| 0 | OK |
+| 1 | INVALID：长度、字段、范围错误 |
+| 2 | UNAUTHORIZED：保留；当前使用 HTTP 401 |
+| 3 | BUSY：资源或任务占用 |
+| 4 | LEASE：租约缺失、不匹配或过期 |
+| 5 | UNSUPPORTED：命令或目标未实现 |
+| 6 | IO：驱动、Flash 或持久化失败 |
+| 7 | INTEGRITY：签名、镜像或内容失败 |
+| 8 | STATE：当前状态不允许 |
+| 9 | CONFLICT：引脚、偏移、重复数据冲突 |
+| 10 | TIMEOUT：执行期限已到 |
+
+调用方检查 HTTP 状态、魔数、版本、opcode、request_id、lease、状态和精确长度。未知状态当作失败。
+
+最近一次成功修改及回复最多保留 60 秒。完全相同的帧回复缓存；同一 opcode/request_id/lease 内容不同返回 CONFLICT。查询不替换缓存，另一成功修改会替换它；租约过期清空缓存。这不是持久化的全局 exactly-once 保证。同一租约修改必须串行提交，结果不明时不得自动重放 DAP/BUS。OTA WRITE 另有重复块比较规则。
+
+## 租约与查询
+
+| opcode | 名称 | 请求负载 | 成功响应 |
+|---:|---|---|---|
+| 1 | INFO | 空 | UTF-8 JSON |
+| 2 | ACQUIRE | ttl_ms u32，lease=0 | lease u64、ttl_ms u32 |
+| 3 | RENEW | ttl_ms u32 | 空 |
+| 4 | RELEASE | 空 | 空 |
+| 5 | PINS | 12 字节配置 | 空 |
+| 6 | CONFIG | 空 | 四条 12 字节配置 |
+| 63 | REBOOT | 空 | 空，约 500 ms 后重启 |
+
+INFO、CONFIG、OTA_STATUS 仅要求有效设备认证，其他操作必须拥有租约，ACQUIRE 除外。租约为随机非零 64 位，TTL 5000..60000 ms。释放、到期、重启会删除驱动并将目标脚设为输入。断开网络连接不等于释放租约。更新任务留在 Flash，可由新的认证租约继续。
+
+INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、leaseActive、allowedPins、freeHeap、minHeap、wifi（ip/ap/channel/rssi/phy）、otaAvailable、pendingBoot、bandStage、capabilities。wifi.phy 是 IDF 枚举值，HE20=5，失败为 -1。AP 的能力检查不能从这个 STA 枚举推断。
+
+## 引脚与数据事务
+
+12 字节配置：protocol u8、count u8、reserved u16=0、hz u32、pins[4] i8。未用脚为 -1。count=0、hz=0、四脚全 -1 表示释放该协议。同协议重配先释放原驱动；新驱动失败时保持未配置。不同协议禁止共用任何 GPIO。CONFIG 按 SWD/UART/SPI/I2C 返回四条记录。
+
+| protocol | 名称 | 脚位顺序 | count | 请求上限 |
+|---:|---|---|---|---|
+| 1 | SWD | SWCLK、SWDIO、可选开漏 nRESET | 2 或 3 | 1 kHz..4 MHz |
+| 2 | UART1 | TX、RX、可选 RTS、CTS | 2 或 4 | 5 Mbaud，8N1 |
+| 3 | SPI2 | SCLK、MOSI、MISO、CS | 4 | 20 MHz，mode 0 |
+| 4 | I2C0 | SCL、SDA | 2 | 1 MHz，外部上拉 |
+
+上限不是实测速度。候选板配置允许 GPIO 0..6、10、15、23，同时强制排除 Flash 16..22、UART0 11/12、USB 13/14、保守保留的 26..28。N4 不足以识别开发板原理图，候选脚是否接外设仍需确认。默认无映射；连接前核对电平、上拉、占用与接地。没有目标供电控制。
+
+opcode 16 DAP：原生 CMSIS-DAP 请求/响应，最大 1024 字节。支持 Info、HostStatus、Connect/Disconnect、TransferConfigure、Transfer、TransferBlock、WriteABORT、Delay、ResetTarget、SWJ_Pins/Clock/Sequence、SWD_Configure/Sequence、最多 16 条命令的 ExecuteCommands。未映射 SWD 时仅允许 Info、HostStatus、Disconnect。没有 JTAG、SWO、CMSIS UART、QueueCommands 和厂商命令。进入 Arm 核心前检查重试、长度和响应预算。C5 本机执行 GPIO，单请求 250 ms 预算，超时后关闭 SWD 并复位核心；软件预算不代替波形测量。
+
+opcode 17 BUS：12 字节头 protocol u8、flags u8=0、address u16、tx_length u16、rx_length u16、timeout_ms u16、reserved u16=0，然后 tx_length 字节。收发各最多 1024，至少一个非零，timeout 1..100 ms。成功响应是接收到的原始字节。
+
+UART 可返回少于请求的接收字节；发送超时释放 UART。UART/SPI address=0。SPI 同时收发要求 tx_length=rx_length，单次 CS 事务。I2C 地址 0x08..0x77，先写后读使用重复起始。UART/SPI 检查理论传输时间；实际等待受 FreeRTOS tick 和驱动调度影响。
+
+开始更新/切频前必须释放所有协议；更新和切频期间拒绝 DAP/BUS。
+
+## 签名双槽 OTA
+
+| opcode | 名称 | 请求负载 | 成功响应 |
+|---:|---|---|---|
+| 32 | OTA_BEGIN | 176 字节已签名 manifest | 28 字节状态 |
+| 33 | OTA_WRITE | job_id u64、offset u32、1..4084 字节 | 28 字节状态 |
+| 34 | OTA_FINISH | job_id u64 | 空 |
+| 35 | OTA_ACTIVATE | job_id u64 | 空，约 500 ms 后重启 |
+| 36 | OTA_STATUS | 空 | 28 字节状态 |
+| 37 | OTA_ABORT | job_id u64 | 空 |
+| 38 | BOOT_CONFIRM | 空 | 空 |
+
+manifest 前 112 字节参与 ECDSA P-256/SHA-256 签名；末尾签名是 32 字节大端 r 紧接 32 字节大端 s，不是 ASN.1 DER。公钥编译进入固件，私钥留在本机。
+
+| 偏移 | 字节数 | 内容 |
+|---|---:|---|
+| 0 | 8 | 非零 job_id |
+| 8 | 1 | target，0 为此 C5；其他返回 UNSUPPORTED |
+| 9 | 1 | flags=0 |
+| 10 | 2 | reserved=0 |
+| 12 | 4 | 完整镜像长度，不得超过非运行槽 |
+| 16 | 32 | 完整镜像 SHA-256 |
+| 48 | 32 | NUL 结尾 version，须与 app descriptor 一致 |
+| 80 | 32 | NUL 结尾 board_id，必须 `esp32c5-n4` |
+| 112 | 64 | P-256 签名 |
+
+状态 28 字节：job_id u64、phase u32、received u32、checkpoint u32、total u32、pendingBoot u32。phase：0 EMPTY、1 RECEIVING、2 VERIFIED、3 ACTIVATED、4 CONFIRMED、5 FAILED。
+
+BEGIN 检查格式、签名、board、大小和启动确认状态。仅操作非运行槽，先持久化新签名任务再擦写，避免掉电后新内容被旧 VERIFIED 任务激活。同一签名 manifest 可恢复接收，不同任务返回 BUSY。
+
+WRITE 按顺序；已接收范围内相同块读回比较后成功，不同内容或跨越当前边界返回 CONFLICT。每跨越 16 KiB 持久化对齐检查点。重启后 received 回到 checkpoint；重新提交相同 BEGIN，从设备状态恢复，不能从主机上次发送位置恢复。检查点之后的数据可重擦重传。Flash 写失败终止句柄并标记 FAILED。
+
+FINISH 要求完整长度，从 Flash 重新计算摘要、检查 project_name=`tetherbench_probe_c5`、version、IDF 镜像有效性，成功才持久化 VERIFIED。ACTIVATE 先持久化再选择启动槽。新镜像运行后必须在 45 秒内通过认证、持租约提交 BOOT_CONFIRM，且网络已就绪；否则由 IDF 回滚。断网不损坏旧运行槽。
+
+ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日志损坏则禁用更新，在 INFO 显示，不擦整个 NVS。没有 eFuse 防降级，旧版本有效签名仍可安装。两槽是运行镜像和候选镜像，连续更新会复用旧槽，并非三份备份。
+
+| 分区 | 偏移 | 大小 |
+|---|---|---|
+| nvs | 0x9000 | 0x6000 |
+| otadata | 0xf000 | 0x2000 |
+| phy_init | 0x11000 | 0x1000 |
+| ota_0 | 0x20000 | 0x1e0000 |
+| ota_1 | 0x200000 | 0x1e0000 |
+| ota_journal | 0x3e0000 | 0x10000 |
+| coredump | 0x3f0000 | 0x10000 |
+
+外部 MCU 后续复用 manifest/job_id/状态/分块语义，但目标标识、镜像格式、存储、掉电保证、bootloader 认证和确认必须由真实适配器定义。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
+
+## Wi-Fi 和协商切频
+
+C5 使用双频 AUTO，协议能力含 802.11ax。STA 在得到 IP 后验证 HE20，否则断开，1..30 秒退避。AP 驱逐没有 11ax 能力的客户端；该检查不是 AP 逐帧 PHY 证明。单射频一次只有一个当前信道。
+
+opcode 48 WIFI_SCAN：空请求，首次启动异步扫描返回 BUSY，完成后再调用返回 count u32 加最多 16 条 12 字节：BSSID[6]、channel u8、rssi i8、phy_11ax u8、authmode u8、reserved[2]=0。仅扫描配置的 SSID。结果读取后释放，下次重扫。扫描不能代替候选链路 RTT/丢包测量。
+
+opcode 49 BAND_PREPARE：transaction_id u64、candidate_channel u8、current_channel u8、reserved u16=0，再接四条 link，共 60 字节。link 顺序为当前本端、当前对端、候选本端、候选对端；每条 rssi i16、loss_permille u16、rtt_ms u16、samples u16、age_ms u32。至少 5 样本、不超过 5 秒；RSSI -110..-1 dBm、丢包 0..1000 千分比、RTT 0..5000 ms。
+
+采用两端最差分数：RSSI 在 -90..-40 dBm 映射到 0..100，减去 loss_permille/10 和 rtt_ms/5，整数截断。候选至少改善 10 分；成功后驻留 30 秒。允许信道 1..11、36、40、44、48，仍受地区规则和驱动约束。
+
+opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64，要求网络就绪且实际信道等于候选。opcode 52 BAND_CANCEL：transaction_id u64，已切换且未确认时恢复旧信道。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED。
+
+当前只实现状态机，尚无自动双 C5 控制器、联合候选试探和 EMA 采样。调用方提交的双方数据必须来自真实测量，不能把扫描 RSSI 或单边 RTT 充当双方证据。Windows 热点信道由 Windows 控制，C5 STA 不能命令它切频；后续需要可控制的 C5 AP/STA 拓扑验证。
+
+## UDP 发现与安全边界
+
+UDP 4440 查询恰好 16 字节：`TBC5DISC`[8]、nonce[8]。回复恰好 124 字节：`TBC5HERE`[8]、原 nonce[8]、NUL 填充 identity[24]、TLS port u16、protocol u8=1、AP flag u8、DER 证书 SHA-256[32]、version[32]、board[16]。字符串含终止 NUL。每秒最多一次，只在网络就绪时回应。发现不是身份认证或健康检查。
+
+没有启用硬件安全启动、Flash 加密和 eFuse 防降级，物理写入者可替换固件或读取开发板秘密。当前签名保护远程更新入口，TLS/令牌保护网络入口。量产需要独立密钥生命周期和不可逆烧写授权。Gateway 原型仍只监听 loopback，固件 TLS 不代表其管理 API 可以暴露到局域网。

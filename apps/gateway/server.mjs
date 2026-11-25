@@ -158,7 +158,7 @@ export function createGatewayServer({ heartbeatTimeoutMs = 15_000, sweepInterval
       const device = devices.get(id);
       if (!device) fail(404, 'device_not_found', 'Device is not registered.');
       device.lastSeenAt = new Date().toISOString();
-      json(response, 200, { id: device.id, lastSeenAt: device.lastSeenAt });
+      json(response, 200, publicDevice(device));
       return;
     }
 
@@ -202,6 +202,12 @@ export function createGatewayServer({ heartbeatTimeoutMs = 15_000, sweepInterval
     }
 
     match = pathname.match(/^\/api\/v1\/sessions\/([^/]+)$/);
+    if (request.method === 'GET' && match) {
+      const session = sessions.get(decodeURIComponent(match[1]));
+      if (!session) fail(404, 'session_not_found', 'Session is not active.');
+      json(response, 200, session);
+      return;
+    }
     if (request.method === 'DELETE' && match) {
       const id = decodeURIComponent(match[1]);
       const session = sessions.get(id);

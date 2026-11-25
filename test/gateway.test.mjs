@@ -50,6 +50,19 @@ describe('local Gateway prototype', () => {
     });
   });
 
+  it('returns the public device object after a heartbeat', async () => {
+    const registered = await api('/api/v1/devices', {
+      method: 'POST', body: { ...vectors.device, id: 'heartbeat-probe' },
+    });
+    try {
+      const heartbeat = await api('/api/v1/devices/heartbeat-probe/heartbeat', { method: 'POST' });
+      assert.equal(heartbeat.status, 200);
+      assert.deepEqual(heartbeat.body, { ...registered.body, lastSeenAt: heartbeat.body.lastSeenAt });
+    } finally {
+      await api('/api/v1/devices/heartbeat-probe', { method: 'DELETE' });
+    }
+  });
+
   it('registers a device, grants one session, exchanges UTF-8 data, and releases ownership', async () => {
     const registered = await api('/api/v1/devices', { method: 'POST', body: vectors.device });
     assert.equal(registered.status, 201);
@@ -61,6 +74,7 @@ describe('local Gateway prototype', () => {
 
     const acquired = await api(`/api/v1/devices/${vectors.device.id}/sessions`, { method: 'POST' });
     assert.equal(acquired.status, 201);
+    assert.deepEqual(await api(`/api/v1/sessions/${acquired.body.id}`), { status: 200, body: acquired.body });
     assert.equal((await api(`/api/v1/devices/${vectors.device.id}/sessions`, { method: 'POST' })).status, 409);
     assert.equal((await api('/api/v1/devices')).body.devices[0].sessionActive, true);
 
@@ -72,6 +86,7 @@ describe('local Gateway prototype', () => {
     assert.equal(exchanged.body.byteLength, Buffer.byteLength(vectors.exchange.data));
 
     assert.equal((await api(`/api/v1/sessions/${acquired.body.id}`, { method: 'DELETE' })).body.released, true);
+    assert.equal((await api(`/api/v1/sessions/${acquired.body.id}`)).status, 404);
     assert.equal((await api(`/api/v1/devices/${vectors.device.id}/sessions`, { method: 'POST' })).status, 201);
     const disconnected = await api(`/api/v1/devices/${vectors.device.id}`, { method: 'DELETE' });
     assert.deepEqual(disconnected.body, { disconnected: true, releasedSession: true });

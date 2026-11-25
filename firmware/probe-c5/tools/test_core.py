@@ -1,0 +1,28 @@
+"""Build and run portable firmware checks with an installed host C compiler."""
+import os
+import pathlib
+import shutil
+import subprocess
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+compiler = os.environ.get("CC") or shutil.which("gcc") or shutil.which("clang")
+if not compiler:
+    raise SystemExit("Install or select a host C compiler with CC; no firmware check was run.")
+with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
+    executable = pathlib.Path(folder) / ("core_test.exe" if os.name == "nt" else "core_test")
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+                    "-I", str(ROOT / "main"), str(ROOT / "main/probe_core.c"),
+                    str(ROOT / "tests/core_test.c"), "-o", str(executable)], check=True)
+    subprocess.run([str(executable)], check=True, timeout=15)
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+                    "-I", str(ROOT / "tests/stubs"), "-I", str(ROOT / "main"),
+                    str(ROOT / "main/probe_core.c"), str(ROOT / "tests/ota_test.c"),
+                    "-o", str(executable)], check=True)
+    subprocess.run([str(executable)], check=True, timeout=15)
+    vendor = ROOT / "third_party/CMSIS-DAP"
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2", "-DTB_HOST_TEST",
+                    "-I", str(ROOT / "main"), "-I", str(ROOT / "tests"), "-I", str(vendor / "Include"),
+                    str(ROOT / "main/probe_core.c"), str(vendor / "Source/DAP.c"), str(vendor / "Source/SW_DP.c"),
+                    str(ROOT / "tests/dap_test.c"), "-o", str(executable)], check=True)
+    subprocess.run([str(executable)], check=True, timeout=15)
