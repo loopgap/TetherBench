@@ -10,6 +10,9 @@ static bool pending, persisted, fail_save, fail_write, fail_delete, valid_signat
 static bool finalized;
 static uint8_t durable[1024], flash_data[65536];
 static size_t durable_size;
+static size_t hashed_size;
+static size_t signature_offset;
+static const uint8_t *hashed_data;
 
 esp_err_t nvs_flash_init_partition(const char *p)
 {
@@ -197,8 +200,8 @@ int psa_destroy_key(mbedtls_svc_key_id_t id)
 int psa_hash_compute(unsigned a, const uint8_t *d, size_t n, uint8_t *out, size_t cap, size_t *actual)
 {
     (void)a;
-    (void)d;
-    (void)n;
+    hashed_size = n;
+    hashed_data = d;
     assert(cap >= 32);
     memset(out, 0x5a, 32);
     *actual = 32;
@@ -210,7 +213,7 @@ int psa_verify_hash(mbedtls_svc_key_id_t id, unsigned a, const uint8_t *d, size_
     (void)a;
     (void)d;
     (void)n;
-    (void)s;
+    signature_offset = (size_t)(s - hashed_data);
     assert(sn == 64);
     return valid_signature ? 0 : -1;
 }
@@ -265,6 +268,17 @@ static void manifest(uint8_t out[176], uint64_t id)
     strcpy((char *)out + 48, "test");
     strcpy((char *)out + 80, TB_BOARD_ID);
 }
+static void target_manifest(uint8_t out[TB_TARGET_MANIFEST_SIZE], uint64_t id)
+{
+    memset(out, 0, TB_TARGET_MANIFEST_SIZE);
+    tb_put64(out, id);
+    out[8] = 1;
+    tb_put32(out + 12, 4096);
+    memset(out + 16, 0x5a, 32);
+    strcpy((char *)out + 48, "target-v1");
+    strcpy((char *)out + 80, "test-target");
+    tb_put64(out + 112, 1);
+}
 static void write_to(uint64_t id, uint32_t end)
 {
     uint8_t block[12 + 2000];
@@ -281,6 +295,39 @@ static void write_to(uint64_t id, uint32_t end)
 int main(void)
 {
     uint8_t m[176], block[112];
+    uint8_t target[TB_TARGET_MANIFEST_SIZE];
+    target_manifest(target, 7);
+    assert(tb_ota_validate_target_manifest(NULL, sizeof target) == TB_INVALID);
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_OK);
+    assert(hashed_size == TB_TARGET_MANIFEST_SIGNED_SIZE && signature_offset == TB_TARGET_MANIFEST_SIGNED_SIZE);
+    assert(tb_ota_validate_target_manifest(target, sizeof target - 1) == TB_INVALID);
+    tb_put64(target, 0);
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    target_manifest(target, 7);
+    target[8] = 0;
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    target[8] = 1;
+    target[10] = 1;
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    target[10] = 0;
+    tb_put32(target + 12, 0);
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    tb_put32(target + 12, 4096);
+    memset(target + 48, 'v', 32);
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    target_manifest(target, 7);
+    target[58] = 1;
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    target[58] = 0;
+    target[9] = 1;
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    target[9] = 0;
+    tb_put64(target + 112, 0);
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INVALID);
+    tb_put64(target + 112, 1);
+    valid_signature = false;
+    assert(tb_ota_validate_target_manifest(target, sizeof target) == TB_INTEGRITY);
+    valid_signature = true;
     manifest(m, 1);
     reboot();
     valid_signature = false;
@@ -290,11 +337,11 @@ int main(void)
     assert(tb_ota_begin(m, 176) == TB_IO && !begins);
     fail_save = false;
     assert(tb_ota_begin(m, 176) == TB_OK);
-    uint32_t target = tb_u32(durable + 12);
+    uint32_t target_address = tb_u32(durable + 12);
     tb_put32(durable + 12, slots[current_slot].address);
     reset_runtime();
     assert(tb_ota_init() == ESP_ERR_INVALID_STATE);
-    tb_put32(durable + 12, target);
+    tb_put32(durable + 12, target_address);
     tb_put32(durable + 8, 1);
     reset_runtime();
     assert(tb_ota_init() == ESP_ERR_INVALID_STATE);

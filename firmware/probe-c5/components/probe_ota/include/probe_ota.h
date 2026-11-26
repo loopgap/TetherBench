@@ -25,6 +25,8 @@ enum tb_status tb_ota_activate(uint64_t id);
 enum tb_status tb_ota_abort(uint64_t id);
 enum tb_status tb_ota_confirm(void);
 size_t tb_ota_status(uint8_t *out);
+// Checks the signed manifest structure; target identity and capabilities require a HELLO exchange.
+enum tb_status tb_ota_validate_target_manifest(const uint8_t *manifest, size_t size);
 
 #ifdef __cplusplus
 }

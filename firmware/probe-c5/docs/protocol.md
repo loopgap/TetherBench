@@ -128,7 +128,7 @@ ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日�
 
 外部 MCU 不能使用 C5 的 176 字节自更新 manifest：目标 MCU 使用带签名回滚索引的 184 字节 manifest，并要求目标 bootloader 独立校验签名、镜像摘要、双槽、持久检查点、试启动确认和回滚。目标与 C5 的详细物理帧、UART COBS、SPI 轮询、能力字段和恢复规则见 [Target MCU OTA v1 契约](../../../contracts/target-mcu-ota.md)。
 
-规划的 C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`、`TARGET_OTA_FINISH`、`TARGET_OTA_ACTIVATE`、`TARGET_OTA_STATUS` 和 `TARGET_OTA_ABORT`。当前固件未注册这些 opcode，不得向 `INFO.capabilities` 声明目标更新；调用方应收到 `UNSUPPORTED`。实现前必须先加入目标端 bootloader 和可复现主机模型测试，再由 C5 组件维护本机持久资源锁；硬件闭环前继续保持未实现状态。
+规划的 C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`、`TARGET_OTA_FINISH`、`TARGET_OTA_ACTIVATE`、`TARGET_OTA_STATUS` 和 `TARGET_OTA_ABORT`。当前已有目标帧编解码与签名 manifest 校验 helper，但固件尚未注册这些 opcode，不得向 `INFO.capabilities` 声明目标更新；调用方应收到 `UNSUPPORTED`。实现前必须先加入目标端 bootloader 和可复现主机模型测试，再由 C5 组件维护本机持久资源锁；硬件闭环前继续保持未实现状态。
 
 | opcode | 请求 | 成功响应 |
 |---:|---|---|

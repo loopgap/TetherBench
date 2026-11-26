@@ -25,7 +25,7 @@ static bool hash(const uint8_t *data, size_t size, uint8_t digest[32])
     size_t actual = 0;
     return psa_hash_compute(PSA_ALG_SHA_256, data, size, digest, 32, &actual) == PSA_SUCCESS && actual == 32;
 }
-static bool signature_valid(const uint8_t *manifest)
+static bool signature_valid(const uint8_t *manifest, size_t signed_size)
 {
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     psa_set_key_type(&attributes, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
@@ -36,11 +36,28 @@ static bool signature_valid(const uint8_t *manifest)
     if (psa_import_key(&attributes, TB_UPDATE_PUBLIC_KEY, 65, &key) != PSA_SUCCESS)
         return false;
     uint8_t digest[32];
-    bool valid = hash(manifest, TB_MANIFEST_SIZE, digest) &&
-                 psa_verify_hash(key, PSA_ALG_ECDSA(PSA_ALG_SHA_256), digest, 32, manifest + TB_MANIFEST_SIZE, 64) ==
-                     PSA_SUCCESS;
+    bool valid = hash(manifest, signed_size, digest) && psa_verify_hash(key, PSA_ALG_ECDSA(PSA_ALG_SHA_256), digest, 32,
+                                                                        manifest + signed_size, 64) == PSA_SUCCESS;
     psa_destroy_key(key);
     return valid;
+}
+static bool padded_string(const uint8_t *text, size_t size)
+{
+    const uint8_t *end = memchr(text, 0, size);
+    if (!end || end == text)
+        return false;
+    for (const uint8_t *p = end + 1; p < text + size; p++)
+        if (*p)
+            return false;
+    return true;
+}
+enum tb_status tb_ota_validate_target_manifest(const uint8_t *manifest, size_t size)
+{
+    if (!manifest || size != TB_TARGET_MANIFEST_SIZE || !tb_u64(manifest) || manifest[8] != 1 || manifest[9] ||
+        tb_u16(manifest + 10) || !tb_u32(manifest + 12) || !padded_string(manifest + 48, 32) ||
+        !padded_string(manifest + 80, 32) || !tb_u64(manifest + 112))
+        return TB_INVALID;
+    return signature_valid(manifest, TB_TARGET_MANIFEST_SIGNED_SIZE) ? TB_OK : TB_INTEGRITY;
 }
 static bool save(void)
 {
@@ -85,7 +102,7 @@ esp_err_t tb_ota_init(void)
         return ESP_OK;
     }
     if (err != ESP_OK || size != sizeof journal || journal.format != 1 || journal.phase > TB_OTA_FAILED ||
-        !signature_valid(journal.manifest))
+        !signature_valid(journal.manifest, TB_MANIFEST_SIZE))
         return ESP_ERR_INVALID_STATE;
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_partition_iterator_t iterator = esp_partition_find(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, NULL);
@@ -124,7 +141,7 @@ enum tb_status tb_ota_begin(const uint8_t *manifest, size_t size)
     if (size != TB_MANIFEST_SIGNED_SIZE || !tb_u64(manifest) || manifest[9] || tb_u16(manifest + 10) ||
         !memchr(manifest + 48, 0, 32) || !memchr(manifest + 80, 0, 32))
         return TB_INVALID;
-    if (!signature_valid(manifest))
+    if (!signature_valid(manifest, TB_MANIFEST_SIZE))
         return TB_INTEGRITY;
     if (manifest[8] != 0)
         return TB_UNSUPPORTED;
