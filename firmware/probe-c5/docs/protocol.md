@@ -104,7 +104,7 @@ manifest 前 112 字节参与 ECDSA P-256/SHA-256 签名；末尾签名是 32 �
 
 状态 28 字节：job_id u64、phase u32、received u32、checkpoint u32、total u32、pendingBoot u32。phase：0 EMPTY、1 RECEIVING、2 VERIFIED、3 ACTIVATED、4 CONFIRMED、5 FAILED。
 
-BEGIN 检查格式、签名、board、大小和启动确认状态。仅操作非运行槽，先持久化新签名任务再擦写，避免掉电后新内容被旧 VERIFIED 任务激活。同一签名 manifest 可恢复接收，不同任务返回 BUSY。
+BEGIN 检查格式、签名、board、大小和启动确认状态。仅操作非运行槽，先持久化新签名任务再擦写，避免掉电后新内容被旧 VERIFIED 任务激活。同一签名 manifest 可恢复接收，不同任务返回 BUSY。启动时会校验 journal 的目标分区、阶段与偏移：RECEIVING 必须指向当前下一 OTA 槽且检查点为 16 KiB 对齐；VERIFIED 必须仍指向下一 OTA 槽；VERIFIED、ACTIVATED、CONFIRMED 的偏移必须等于镜像总长。ACTIVATED 在新镜像启动后允许目标分区等于当前运行槽；若设备仍运行旧镜像则该任务标记 FAILED。违反这些条件的 journal 会让 OTA 初始化失败，不会擦除 NVS。
 
 WRITE 按顺序；已接收范围内相同块读回比较后成功，不同内容或跨越当前边界返回 CONFLICT。每跨越 16 KiB 持久化对齐检查点。重启后 received 回到 checkpoint；重新提交相同 BEGIN，从设备状态恢复，不能从主机上次发送位置恢复。检查点之后的数据可重擦重传。Flash 写失败终止句柄并标记 FAILED。
 

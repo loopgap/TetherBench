@@ -74,6 +74,7 @@ static void reboot(void) {
     memset(&journal,0,sizeof journal);handle=0;destination=NULL;received=0;
     assert(tb_ota_init()==ESP_OK);
 }
+static void reset_runtime(void) { memset(&journal,0,sizeof journal);handle=0;destination=NULL;received=0; }
 static void manifest(uint8_t out[176],uint64_t id) {
     memset(out,0,176);tb_put64(out,id);tb_put32(out+12,40000);memset(out+16,0x5a,32);
     strcpy((char *)out+48,"test");strcpy((char *)out+80,TB_BOARD_ID);
@@ -89,7 +90,13 @@ int main(void) {
     uint8_t m[176], block[112];manifest(m,1);reboot();
     valid_signature=false;assert(tb_ota_begin(m,176)==TB_INTEGRITY && !begins);valid_signature=true;
     fail_save=true;assert(tb_ota_begin(m,176)==TB_IO && !begins);fail_save=false;
-    assert(tb_ota_begin(m,176)==TB_OK);write_to(1,20000);assert(journal.offset==16384);
+    assert(tb_ota_begin(m,176)==TB_OK);
+    uint32_t target=tb_u32(durable+12);tb_put32(durable+12,slots[current_slot].address);reset_runtime();
+    assert(tb_ota_init()==ESP_ERR_INVALID_STATE);
+    tb_put32(durable+12,target);tb_put32(durable+8,1);reset_runtime();
+    assert(tb_ota_init()==ESP_ERR_INVALID_STATE);
+    tb_put32(durable+8,0);reboot();assert(tb_ota_begin(m,176)==TB_OK);
+    write_to(1,20000);assert(journal.offset==16384);
     unsigned before=writes;memset(block+12,0x33,100);tb_put64(block,1);tb_put32(block+8,19000);
     assert(tb_ota_write(block,sizeof block)==TB_OK && writes==before);
     block[12]^=1;assert(tb_ota_write(block,sizeof block)==TB_CONFLICT);

@@ -69,8 +69,15 @@ esp_err_t tb_ota_init(void) {
         iterator=esp_partition_next(iterator);
     }
     esp_partition_iterator_release(iterator);
-    if (!destination || journal.offset>tb_u32(journal.manifest+12) ||
-        tb_u32(journal.manifest+12)>destination->size) return ESP_ERR_INVALID_STATE;
+    uint32_t total=tb_u32(journal.manifest+12);
+    const esp_partition_t *next=esp_ota_get_next_update_partition(NULL);
+    bool inactive_target=next && next->address==journal.address;
+    if (!destination || journal.offset>total || total>destination->size ||
+        ((journal.phase==TB_OTA_RECEIVING || journal.phase==TB_OTA_VERIFIED ||
+          (journal.phase==TB_OTA_ACTIVATED && running->address!=journal.address)) && !inactive_target) ||
+        (journal.phase==TB_OTA_RECEIVING && (journal.offset&16383u)) ||
+        ((journal.phase==TB_OTA_VERIFIED || journal.phase==TB_OTA_ACTIVATED || journal.phase==TB_OTA_CONFIRMED) &&
+         journal.offset!=total)) return ESP_ERR_INVALID_STATE;
     received=journal.offset;
     if (journal.phase==TB_OTA_ACTIVATED && running->address!=journal.address) {
         journal.phase=TB_OTA_FAILED;
