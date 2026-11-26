@@ -122,7 +122,25 @@ ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日�
 | ota_journal | 0x3e0000 | 0x10000 |
 | coredump | 0x3f0000 | 0x10000 |
 
-外部 MCU 后续复用 manifest/job_id/状态/分块语义，但目标标识、镜像格式、存储、掉电保证、bootloader 认证和确认必须由真实适配器定义。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
+外部 MCU 的签名双槽更新契约处于草案状态；目标 bootloader 及 C5 转发适配均未实现。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
+
+## 外部 MCU OTA 扩展草案（当前未实现）
+
+外部 MCU 不能使用 C5 的 176 字节自更新 manifest：目标 MCU 使用带签名回滚索引的 184 字节 manifest，并要求目标 bootloader 独立校验签名、镜像摘要、双槽、持久检查点、试启动确认和回滚。目标与 C5 的详细物理帧、UART COBS、SPI 轮询、能力字段和恢复规则见 [Target MCU OTA v1 契约](../../../contracts/target-mcu-ota.md)。
+
+规划的 C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`、`TARGET_OTA_FINISH`、`TARGET_OTA_ACTIVATE`、`TARGET_OTA_STATUS` 和 `TARGET_OTA_ABORT`。当前固件未注册这些 opcode，不得向 `INFO.capabilities` 声明目标更新；调用方应收到 `UNSUPPORTED`。实现前必须先加入目标端 bootloader 和可复现主机模型测试，再由 C5 组件维护本机持久资源锁；硬件闭环前继续保持未实现状态。
+
+| opcode | 请求 | 成功响应 |
+|---:|---|---|
+| 39 TARGET_INFO | UART=2 或 SPI=3 u8 | 180 字节 HELLO 能力、身份和 OTA 状态 |
+| 40 TARGET_OTA_BEGIN | 184 字节 target manifest | 64 字节状态 |
+| 41 TARGET_OTA_WRITE | `job_id` u64、`offset` u32、1..983 字节 | 64 字节状态 |
+| 42 TARGET_OTA_FINISH | `job_id` u64 | 64 字节状态 |
+| 43 TARGET_OTA_ACTIVATE | `job_id` u64 | 64 字节状态 |
+| 44 TARGET_OTA_STATUS | 空 | 64 字节状态 |
+| 45 TARGET_OTA_ABORT | `job_id` u64 | 64 字节状态 |
+
+TARGET_INFO 要求唯一 UART/SPI 总线已配置。HELLO 返回的运行状态使 C5 能在重启后发现尚未完成的目标任务；C5 必须先持久化同一总线的恢复锁，再开放任何目标总线操作。BEGIN 核对 board ID、镜像容量和全部必需安全能力，然后把签名 manifest 与总线协议持久化到独立更新锁；写锁成功后才向目标发 BEGIN。掉电或目标响应超时均保留锁；恢复时重新配置同一总线并查询 STATUS。更新锁期间 PINS 只允许重新配置相同总线，DAP、原始 BUS、切频、C5 自身 OTA 和其他协议配置均返回 BUSY。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。
 
 ## Wi-Fi 和协商切频
 

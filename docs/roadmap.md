@@ -16,7 +16,7 @@
 - 本机没有 Go、OpenOCD 或 STM32 硬件工具链；ESP-IDF v6.1.1 已安装并完成 C5 构建。
 - 没有确认具体 C5/P4 板卡和电气设计，不能给出引脚、SWD 时钟或 USB High-Speed 声明。
 - `gh auth status` 为 401；仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人均未验证，因而不推送远端。
-- 设备配对、远端身份、TLS、升级密钥和 STM32 Bootloader 安全模型仍需决策。
+- 外部 MCU OTA 已形成目标端签名双槽、持久续传与确认契约；C5 适配器、STM32F405 目标 bootloader、升级密钥保护和板级启动/Flash 布局仍待实现及硬件验证。
 
 下一项最小工作：提供能协商 Wi-Fi 6 HE20 的接入点，完成 COM8 的发现、TLS、租约、DAP、OTA 恢复和双设备测试；随后再扩展控制台的多设备管理界面。
 
