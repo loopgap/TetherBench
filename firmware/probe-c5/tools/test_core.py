@@ -3,6 +3,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -21,8 +22,9 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
                     "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
     vendor = ROOT / "third_party/CMSIS-DAP"
-    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2", "-DTB_HOST_TEST",
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2", "-DTB_HOST_TEST", "-DTB_HOST_EXPIRE_TEST",
                     "-I", str(ROOT / "main"), "-I", str(ROOT / "tests"), "-I", str(vendor / "Include"),
                     str(ROOT / "main/probe_core.c"), str(vendor / "Source/DAP.c"), str(vendor / "Source/SW_DP.c"),
                     str(ROOT / "tests/dap_test.c"), "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
+    subprocess.run([sys.executable, str(ROOT / "tools/test_pyocd_transport.py")], check=True, timeout=15)

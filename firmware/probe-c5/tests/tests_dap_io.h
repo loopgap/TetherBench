@@ -9,4 +9,8 @@ static inline void tb_gpio_write(unsigned role, uint32_t value) { (void)role; (v
 static inline void tb_swd_direction(bool value) { (void)value; }
 static inline void tb_swd_on(void) {}
 static inline void tb_swd_off(void) {}
+#ifdef TB_HOST_EXPIRE_TEST
+bool tb_dap_expired(void);
+#else
 static inline bool tb_dap_expired(void) { return false; }
+#endif

@@ -27,6 +27,7 @@ extern const unsigned char server_key_end[] asm("_binary_server_key_end");
 static struct tb_lease lease;
 static struct tb_band band;
 static SemaphoreHandle_t mutex;
+static SemaphoreHandle_t rpc_mutex;
 static uint64_t restart_at, boot_deadline;
 static bool ota_available;
 static uint8_t request_buffer[TB_HEADER_SIZE+TB_MAX_PAYLOAD];
@@ -141,7 +142,7 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         struct tb_link links[4];
         for (unsigned i=0;i<4;i++) {
             const uint8_t *item=p+12+12*i; uint32_t age=tb_u32(item+8);
-            if (age>now) return TB_INVALID;
+            if (age>now || age>30000) return TB_INVALID;
             links[i]=(struct tb_link){.rssi=(int16_t)tb_u16(item),.loss_permille=tb_u16(item+2),
                 .rtt_ms=tb_u16(item+4),.samples=tb_u16(item+6),.measured=now-age};
         }
@@ -151,12 +152,17 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         return f->size==12?tb_band_commit(&band,now,tb_u64(p),tb_u32(p+8)):TB_INVALID;
     case TB_BAND_CONFIRM:
         if (f->size!=8) return TB_INVALID;
-        if (!tb_wifi_ready() || tb_wifi_channel()!=band.channel) return TB_STATE;
-        return tb_band_confirm(&band,now,tb_u64(p));
-    case TB_BAND_CANCEL:
-        if (f->size!=8 || band.id!=tb_u64(p)) return TB_INVALID;
-        if (band.stage==TB_BAND_SWITCHED) tb_wifi_switch(band.previous);
-        band.stage=TB_BAND_IDLE; return TB_OK;
+        return tb_band_confirm(&band,now,tb_u64(p),tb_wifi_ready(),tb_wifi_channel(),tb_wifi_rssi(),tb_wifi_he20());
+    case TB_BAND_CANCEL: {
+        if (f->size!=8) return TB_INVALID;
+        struct tb_band previous=band; bool restore=false;
+        enum tb_status cancelled=tb_band_cancel(&band,now,tb_u64(p),&restore);
+        if (cancelled!=TB_OK) return cancelled;
+        if (restore && tb_wifi_switch(previous.previous)!=TB_OK) { band=previous; return TB_IO; }
+        return TB_OK;
+    }
+    case TB_BAND_FINALIZE:
+        return f->size==8?tb_band_finalize(&band,now,tb_u64(p)):TB_INVALID;
     case TB_REBOOT:
         if (!empty(f)) return TB_INVALID;
         tb_io_release(); restart_at=now+500; return TB_OK;
@@ -184,18 +190,26 @@ static esp_err_t rpc(httpd_req_t *request) {
         httpd_resp_set_hdr(request,"Connection","close");
         httpd_resp_send_err(request,HTTPD_400_BAD_REQUEST,"Invalid frame or content type"); return ESP_FAIL;
     }
+    // The HTTP server can run two handlers, while the bounded frame buffers are shared.
+    // Serialize only the buffer lifetime; the control mutex still protects device state.
+    if (xSemaphoreTake(rpc_mutex,pdMS_TO_TICKS(5000))!=pdTRUE) {
+        httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"RPC busy"); return ESP_FAIL;
+    }
     uint64_t started=now_ms(); size_t received=0;
     while (received<request->content_len) {
-        if (now_ms()-started>5000) return ESP_FAIL;
+        if (now_ms()-started>5000) { xSemaphoreGive(rpc_mutex); return ESP_FAIL; }
         int count=httpd_req_recv(request,(char *)request_buffer+received,request->content_len-received);
-        if (count<=0) return ESP_FAIL;
+        if (count<=0) { xSemaphoreGive(rpc_mutex); return ESP_FAIL; }
         received+=(size_t)count;
     }
     struct tb_frame frame;
     if (tb_decode(request_buffer,received,&frame)!=TB_OK) {
+        xSemaphoreGive(rpc_mutex);
         httpd_resp_send_err(request,HTTPD_400_BAD_REQUEST,"Invalid frame"); return ESP_FAIL;
     }
-    if (xSemaphoreTake(mutex,pdMS_TO_TICKS(500))!=pdTRUE) return ESP_FAIL;
+    if (xSemaphoreTake(mutex,pdMS_TO_TICKS(500))!=pdTRUE) {
+        xSemaphoreGive(rpc_mutex); return ESP_FAIL;
+    }
     uint64_t now=now_ms(); reap(now);
     size_t response_size;
     if (previous_size==received && now-previous_at<60000 && !memcmp(previous_request,request_buffer,received)) {
@@ -215,7 +229,9 @@ static esp_err_t rpc(httpd_req_t *request) {
     xSemaphoreGive(mutex);
     httpd_resp_set_type(request,"application/octet-stream");
     httpd_resp_set_hdr(request,"Cache-Control","no-store");
-    return httpd_resp_send(request,(const char *)response_buffer,response_size);
+    esp_err_t result=httpd_resp_send(request,(const char *)response_buffer,response_size);
+    xSemaphoreGive(rpc_mutex);
+    return result;
 }
 static void control(void *arg) {
     (void)arg;
@@ -264,7 +280,8 @@ static void discover(void *arg) {
 }
 esp_err_t tb_service_start(void) {
     if (psa_crypto_init()!=PSA_SUCCESS) return ESP_FAIL;
-    mutex=xSemaphoreCreateMutex(); if (!mutex) return ESP_ERR_NO_MEM;
+    mutex=xSemaphoreCreateMutex(); rpc_mutex=xSemaphoreCreateMutex();
+    if (!mutex || !rpc_mutex) return ESP_ERR_NO_MEM;
     tb_io_release();
     esp_err_t status=tb_ota_init(); ota_available=status==ESP_OK;
     if (!ota_available) ESP_LOGE("ota","Journal unavailable: %s; updates disabled",esp_err_to_name(status));

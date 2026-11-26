@@ -71,10 +71,10 @@ static bool dap_command(const uint8_t *p, size_t n, size_t *used, size_t *out, u
     case 0x03: need=1; break;
     case 0x04:
         need=6;
-        if (n>=6 && (p[1]>32 || tb_u16(p+2)>100 || tb_u16(p+4)>100)) return false;
+        if (n>=6 && p[1]>32) return false;
         break;
     case 0x05: {
-        if (n<3 || p[1]!=0 || p[2]>64) return false;
+        if (n<3 || p[1]!=0) return false;
         need=3; response=3;
         for (unsigned i=0;i<p[2];i++) {
             if (need>=n) return false;
@@ -88,7 +88,7 @@ static bool dap_command(const uint8_t *p, size_t n, size_t *used, size_t *out, u
         break;
     }
     case 0x06: {
-        if (n<5 || p[1]!=0 || !tb_u16(p+2) || tb_u16(p+2)>128 || p[4]&0xf0) return false;
+        if (n<5 || p[1]!=0 || !tb_u16(p+2) || tb_u16(p+2)>255 || p[4]&0xf0) return false;
         size_t count=tb_u16(p+2); need=5; response=4;
         if (p[4]&2) response+=count*4; else need+=count*4;
         break;
@@ -135,24 +135,57 @@ int tb_link_score(const struct tb_link *local, const struct tb_link *peer, uint6
     int worst=INT_MAX;
     for (unsigned i=0;i<2;i++) {
         const struct tb_link *l=links[i];
-        if (l->measured>now || now-l->measured>5000 || l->samples<5 ||
-            l->rssi < -110 || l->rssi > -1 || l->loss_permille>1000 || l->rtt_ms>5000) return INT_MIN;
+        if (l->measured>now || now-l->measured>30000 || l->samples<5 ||
+            l->rssi < -110 || l->rssi > -1 || l->loss_permille>1000 ||
+            (l->rtt_ms!=UINT16_MAX && l->rtt_ms>5000)) return INT_MIN;
         int rssi=l->rssi<-90?0:l->rssi>-40?100:2*(l->rssi+90);
-        int score=rssi-(int)l->loss_permille/10-(int)l->rtt_ms/5;
+        int score=rssi-(int)l->loss_permille/10-(l->rtt_ms==UINT16_MAX?0:(int)l->rtt_ms/5);
         if (score<worst) worst=score;
     }
     return worst;
+}
+int8_t tb_worst_rssi(const int8_t *samples, size_t count) {
+    if (!samples || !count) return -127;
+    int8_t worst=samples[0];
+    for (size_t i=1;i<count;i++) if (samples[i]<worst) worst=samples[i];
+    return worst;
+}
+bool tb_scan_merge(struct tb_scan_ap *records, size_t *count, size_t capacity, const struct tb_scan_ap *sample) {
+    if (!records || !count || !sample || !capacity || *count>capacity || sample->sightings!=1) return false;
+    size_t index=0;
+    while (index<*count && (records[index].channel!=sample->channel || memcmp(records[index].bssid,sample->bssid,6))) index++;
+    if (index==*count) {
+        if (*count==capacity) return false;
+        records[index]=*sample; (*count)++; return true;
+    }
+    struct tb_scan_ap *record=&records[index];
+    if (record->sightings>=5) return true;
+    record->rssi[record->sightings++]=sample->rssi[0];
+    record->wifi6=(uint8_t)(record->wifi6 && sample->wifi6);
+    return true;
+}
+int8_t tb_scan_median_rssi(const struct tb_scan_ap *record) {
+    if (!record || !record->sightings || record->sightings>5) return -127;
+    int8_t sorted[5]; memcpy(sorted,record->rssi,record->sightings);
+    for (unsigned i=1;i<record->sightings;i++) {
+        int8_t value=sorted[i]; unsigned j=i;
+        while (j && sorted[j-1]>value) { sorted[j]=sorted[j-1]; j--; }
+        sorted[j]=value;
+    }
+    return sorted[record->sightings/2];
 }
 enum tb_status tb_band_prepare(struct tb_band *b, uint64_t now, uint64_t id, uint8_t channel,
                               uint8_t previous, const struct tb_link current[2], const struct tb_link next[2]) {
     if (b->stage!=TB_BAND_IDLE) return TB_BUSY;
     if (!id || !((channel>=1 && channel<=11) || channel==36 || channel==40 || channel==44 || channel==48) ||
         channel==previous) return TB_INVALID;
+    if (current[0].rtt_ms==UINT16_MAX || current[1].rtt_ms==UINT16_MAX) return TB_INVALID;
     int old=tb_link_score(current,current+1,now), candidate=tb_link_score(next,next+1,now);
     if (old==INT_MIN || candidate==INT_MIN) return TB_INVALID;
     if (candidate<old+10 || (b->last_switch && now-b->last_switch<30000)) return TB_STATE;
     *b=(struct tb_band){.stage=TB_BAND_PREPARED,.id=id,.deadline=now+5000,
-                        .last_switch=b->last_switch,.channel=channel,.previous=previous};
+                        .last_switch=b->last_switch,.previous_last_switch=b->last_switch,
+                        .channel=channel,.previous=previous};
     return TB_OK;
 }
 enum tb_status tb_band_commit(struct tb_band *b, uint64_t now, uint64_t id, uint32_t delay_ms) {
@@ -160,13 +193,38 @@ enum tb_status tb_band_commit(struct tb_band *b, uint64_t now, uint64_t id, uint
     if (delay_ms<500 || delay_ms>3000) return TB_INVALID;
     b->stage=TB_BAND_COMMITTED; b->deadline=now+delay_ms; return TB_OK;
 }
-enum tb_status tb_band_confirm(struct tb_band *b, uint64_t now, uint64_t id) {
-    if (b->stage!=TB_BAND_SWITCHED || b->id!=id || now>=b->deadline) return TB_STATE;
-    b->stage=TB_BAND_IDLE; b->last_switch=now; return TB_OK;
+enum tb_status tb_band_confirm(struct tb_band *b, uint64_t now, uint64_t id, bool ready,
+                               uint8_t channel, int rssi, bool he20) {
+    if (b->stage!=TB_BAND_SWITCHED || b->id!=id || now>=b->deadline || !ready ||
+        channel!=b->channel || rssi < TB_BAND_CONFIRM_MIN_RSSI || !he20) return TB_STATE;
+    b->stage=TB_BAND_CONFIRMED; b->previous_last_switch=b->last_switch; b->last_switch=now;
+    b->deadline=now+15000; b->rollback_until=b->deadline; return TB_OK;
+}
+enum tb_status tb_band_finalize(struct tb_band *b, uint64_t now, uint64_t id) {
+    if (!b || !id || b->id!=id) return TB_INVALID;
+    if (b->stage==TB_BAND_IDLE && b->confirmed) return TB_OK;
+    if (b->stage!=TB_BAND_CONFIRMED || now>=b->deadline) return TB_STATE;
+    b->stage=TB_BAND_IDLE; b->confirmed=true; b->rollback_until=now+15000; return TB_OK;
+}
+enum tb_status tb_band_cancel(struct tb_band *b, uint64_t now, uint64_t id, bool *restore) {
+    if (!b || !restore || !id || b->id!=id) return TB_INVALID;
+    *restore=false;
+    if (b->stage==TB_BAND_IDLE && b->confirmed) {
+        if (now>=b->rollback_until) return TB_STATE;
+        *restore=true;
+    } else if (b->stage==TB_BAND_SWITCHED || b->stage==TB_BAND_CONFIRMED) *restore=true;
+    else if (b->stage==TB_BAND_IDLE) return TB_OK;
+    b->stage=TB_BAND_IDLE; b->confirmed=false; b->rollback_until=0;
+    if (*restore) b->last_switch=b->previous_last_switch;
+    return TB_OK;
 }
 int tb_band_tick(struct tb_band *b, uint64_t now) {
+    if (b->stage==TB_BAND_IDLE && b->confirmed && now>=b->rollback_until) {
+        b->confirmed=false; b->rollback_until=0;
+    }
     if (b->stage==TB_BAND_IDLE || now<b->deadline) return 0;
     if (b->stage==TB_BAND_PREPARED) { b->stage=TB_BAND_IDLE; return 0; }
     if (b->stage==TB_BAND_COMMITTED) { b->stage=TB_BAND_SWITCHED; b->deadline=now+15000; return 1; }
+    if (b->stage==TB_BAND_CONFIRMED) { b->stage=TB_BAND_IDLE; b->last_switch=b->previous_last_switch; b->rollback_until=0; return -1; }
     b->stage=TB_BAND_IDLE; return -1;
 }

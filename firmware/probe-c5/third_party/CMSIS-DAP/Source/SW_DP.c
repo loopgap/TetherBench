@@ -106,6 +106,7 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
 
   if (info & SWD_SEQUENCE_DIN) {
     while (n) {
+      if (tb_dap_expired()) return;
       val = 0U;
       for (k = 8U; k && n; k--, n--) {
         SW_READ_BIT(bit);
@@ -117,6 +118,7 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
     }
   } else {
     while (n) {
+      if (tb_dap_expired()) return;
       val = *swdo++;
       for (k = 8U; k && n; k--, n--) {
         SW_WRITE_BIT(val);
