@@ -1,0 +1,19 @@
+# ADR 0004：无线控制台视觉与动效
+
+日期：2026-11-26。状态：已实现；桌面和移动浏览器已检查。
+
+## 决定
+
+控制台采用冷色、低噪声的嵌入式工作台视觉：中性浅色表面承载信息层次，蓝紫渐变只强调品牌与主要动作，绿色不作为主色。沿用系统字体栈（Apple 系统字体、Segoe UI Variable、PingFang SC、Microsoft YaHei），不下载字体或引入新的 UI 依赖。状态信息使用文字和图标共同表达，不能只用颜色。
+
+页面按工作区、设备功能和当前操作分层。桌面宽屏允许并排状态卡；窄屏改为纵向内容，五项全局导航保持可见。设备统计、状态和错误详情作为独立表面呈现。表单、文件选择和结果输出保留清楚标签与足够触控尺寸。
+
+页面切换采用短暂的淡入/位移过渡，缓动使用 `cubic-bezier(.22,1,.36,1)`。导航不持续自动播放；环境设置 `prefers-reduced-motion: reduce` 时跳过入场动画。路由变化将焦点送至新标题，跳过链接聚焦主内容，控件保留键盘可见焦点。
+
+## 依据与验证
+
+Apple Human Interface Guidelines 的 Layout 章节用于检查空间层次和连续导航：[Layout](https://developer.apple.com/design/human-interface-guidelines/layout)。Google Material 3 Motion 指南用于检查过渡应服务于状态变化并保持适度：[How motion works](https://m3.material.io/styles/motion/overview/how-it-works)。具体配色和信息密度按 TetherBench 的实验台与本机优先需求实现，而不是复制两家产品界面。
+
+2026-11-26 浏览器检查：桌面默认窗口约 1106 px；响应式视口 390×844 CSS px。移动文档宽度 375 px，不超过 390 px 视口宽度；五个全局导航项各约 69×54 px，设备页主要按钮 44 px，调试选择框 46 px。设备管理、C5 OTA、调试和模拟器页面可见且未发生横向页面溢出。键盘跳过链接将焦点移动到 `#main-content`。`npm run check` 中 reduced-motion 路由测试通过。
+
+这些检查覆盖本机浏览器布局和可访问性状态，不代表屏幕阅读器、所有系统字体、真实设备操作或浏览器组合的完整认证。
