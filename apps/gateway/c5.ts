@@ -617,6 +617,10 @@ export class C5Registry {
       const data = await this.client(record).rpc(op, payload);
       record.lastSeenAt = new Date(this.now()).toISOString();
       if (op === OP.OTA_STATUS) record.ota = decodeOta(data);
+      else if (op === OP.OTA_ABORT) record.ota = { jobId: '0', phase: 0, received: 0, checkpoint: 0, total: 0, pendingBoot: false };
+      else if (op === OP.OTA_ACTIVATE && payload.length === 8 && record.ota?.jobId === payload.readBigUInt64LE().toString()) {
+        record.ota = { ...record.ota, phase: 3, pendingBoot: false };
+      }
       return data;
     }, { wait });
   }
@@ -650,6 +654,9 @@ export class C5Registry {
           } else await client.renew();
         }
         item.info = await client.info();
+        if (item.info.pendingBoot || item.ota?.phase === 3) {
+          item.ota = decodeOta(await client.rpc(OP.OTA_STATUS, Buffer.alloc(0), 0n));
+        }
         item.lastSeenAt = new Date(this.now()).toISOString();
       });
     }));

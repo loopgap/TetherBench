@@ -27,7 +27,7 @@ function fixtures() {
     now: () => clock, discovery: async () => [],
     clientFactory(options: C5ClientOptions) {
       const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, closed: false,
-        close() { this.closed = true; }, async info() { if (this.closed) throw new Error('client is closed'); if (this.fail) throw new Error('connection lost'); return { id: 'c5-00000000000' + options.id.slice(-1), board: 'esp32c5-n4' }; },
+        close() { this.closed = true; }, async info() { if (this.closed) throw new Error('client is closed'); if (this.fail) throw new Error('connection lost'); return { id: 'c5-00000000000' + options.id.slice(-1), board: 'esp32c5-n4', pendingBoot: Boolean(this.pendingBoot) }; },
         async acquire() { this.lease = 42n; }, async renew() { this.renewed = true; }, async release() { this.lease = 0n; },
         async rpc(op: number, data: Buffer = Buffer.alloc(0)) {
           if (op === OP.PINS) { data.copy(this.pins, (data[0] - 1) * 12); return Buffer.alloc(0); }
@@ -36,9 +36,11 @@ function fixtures() {
           if (op === OP.OTA_BEGIN) { this.job = data.readBigUInt64LE(); this.total = data.readUInt32LE(12); this.phase = 1; }
           if (op === OP.OTA_WRITE) { assert.equal(data.readUInt32LE(8), this.received); this.received += data.length - 12; }
           if (op === OP.OTA_FINISH) { assert.equal(this.received, this.total); this.phase = 2; return Buffer.alloc(0); }
+          if (op === OP.OTA_ABORT) { this.job = 0n; this.received = 0; this.total = 0; this.phase = 0; return Buffer.alloc(0); }
+          if (op === OP.OTA_ACTIVATE) { this.job = data.readBigUInt64LE(); this.phase = 3; return Buffer.alloc(0); }
           if (new Set<number>([OP.OTA_BEGIN, OP.OTA_WRITE, OP.OTA_STATUS]).has(op)) {
             const state = Buffer.alloc(28); state.writeBigUInt64LE(this.job); state.writeUInt32LE(this.phase, 8);
-            state.writeUInt32LE(this.received, 12); state.writeUInt32LE(this.total ?? 0, 20); return state;
+            state.writeUInt32LE(this.received, 12); state.writeUInt32LE(this.total ?? 0, 20); state.writeUInt32LE(this.pendingBoot ? 1 : 0, 24); return state;
           }
           return data;
         } }; clients.push(client); return client as unknown as InstanceType<typeof C5Client>;
@@ -240,5 +242,29 @@ test('an interrupted OTA request preserves the healthy C5 connection and session
     assert.equal(registry.record('probe-1').connected, true);
     assert.equal(registry.record('probe-1').session?.id, session.id);
     assert.equal(clients[0].closed, false);
+  } finally { registry.close(); }
+});
+
+test('OTA commands refresh cached state and maintenance reconciles a pending boot or rollback', async () => {
+  const { registry, clients } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const record = registry.record('probe-1');
+    record.ota = { jobId: '42', phase: 1, received: 4096, checkpoint: 4096, total: 8192, pendingBoot: false };
+    const job = Buffer.alloc(8); job.writeBigUInt64LE(42n);
+    await registry.command('probe-1', session.id, OP.OTA_ABORT, job);
+    assert.deepEqual(record.ota, { jobId: '0', phase: 0, received: 0, checkpoint: 0, total: 0, pendingBoot: false });
+
+    record.ota = { jobId: '42', phase: 2, received: 8192, checkpoint: 8192, total: 8192, pendingBoot: false };
+    clients[0].received = 8192; clients[0].total = 8192;
+    await registry.command('probe-1', session.id, OP.OTA_ACTIVATE, job);
+    assert.equal(record.ota.phase, 3);
+    clients[0].pendingBoot = true;
+    await registry.maintain();
+    assert.equal(record.ota?.phase, 3); assert.equal(record.ota?.pendingBoot, true);
+
+    clients[0].pendingBoot = false; clients[0].phase = 5;
+    await registry.maintain();
+    assert.equal(record.ota?.phase, 5); assert.equal(record.ota?.pendingBoot, false);
   } finally { registry.close(); }
 });
