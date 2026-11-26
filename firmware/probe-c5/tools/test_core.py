@@ -20,7 +20,8 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
     target_link = ROOT / "components/probe_target_ota"
     subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
                     "-I", str(ROOT / "tests/stubs"), "-I", str(CORE / "include"),
-                    "-I", str(target_link / "include"), str(CORE / "probe_core.c"),
+                    "-I", str(target_link / "include"), "-I", str(ROOT / "components/probe_ota/include"),
+                    str(CORE / "probe_core.c"),
                     str(target_link / "probe_target_ota.c"), str(ROOT / "tests/target_link_test.c"),
                     "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
@@ -31,7 +32,8 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
                     "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
     vendor = ROOT / "third_party/CMSIS-DAP"
-    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2", "-DTB_HOST_TEST", "-DTB_HOST_EXPIRE_TEST",
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2",
+                    "-DTB_HOST_TEST", "-DTB_HOST_EXPIRE_TEST",
                     "-I", str(CORE / "include"), "-I", str(ROOT / "components/probe_dap/include"),
                     "-I", str(ROOT / "tests"), "-I", str(vendor / "Include"),
                     str(CORE / "probe_core.c"), str(vendor / "Source/DAP.c"), str(vendor / "Source/SW_DP.c"),

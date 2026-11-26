@@ -140,17 +140,19 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
             return TB_STATE;
         struct tb_pins pins = {.protocol = p[0], .count = p[1], .hz = tb_u32(p + 4)};
         memcpy(pins.pin, p + 8, 4);
+        if (tb_target_ota_busy() && pins.protocol != tb_target_ota_protocol())
+            return TB_BUSY;
         enum tb_status status = tb_io_configure(&pins);
         if (status == TB_OK && pins.protocol == TB_SWD)
             tb_dap_configure(pins.hz);
         return status;
     }
     case TB_DAP:
-        if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+        if (tb_ota_busy() || tb_target_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
         return tb_dap_execute(p, f->size, out, size);
     case TB_BUS:
-        if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+        if (tb_ota_busy() || tb_target_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
         return tb_io_bus(p, f->size, out, size);
     case TB_TARGET_INFO:
@@ -162,9 +164,32 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
             if (i != p[0] && tb_pin_config[i].count)
                 return TB_BUSY;
         return tb_target_ota_info(p[0], out, size);
+    case TB_TARGET_OTA_BEGIN:
+        if (f->size != 1 + TB_TARGET_MANIFEST_SIZE || (p[0] != TB_UART && p[0] != TB_SPI))
+            return TB_INVALID;
+        if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+            return TB_BUSY;
+        for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++)
+            if (i != p[0] && tb_pin_config[i].count)
+                return TB_BUSY;
+        return tb_target_ota_begin(p[0], p + 1, f->size - 1, out, size);
+    case TB_TARGET_OTA_WRITE:
+        return tb_target_ota_write(p, f->size, out, size);
+    case TB_TARGET_OTA_FINISH:
+        return tb_target_ota_finish(p, f->size, out, size);
+    case TB_TARGET_OTA_ACTIVATE:
+        return tb_target_ota_activate(p, f->size, out, size);
+    case TB_TARGET_OTA_STATUS:
+        if (!empty(f))
+            return TB_INVALID;
+        return tb_target_ota_status(out, size);
+    case TB_TARGET_OTA_ABORT:
+        return tb_target_ota_abort(p, f->size, out, size);
     case TB_OTA_BEGIN: {
         if (!ota_available)
             return TB_IO;
+        if (tb_target_ota_busy())
+            return TB_BUSY;
         if (band.stage != TB_BAND_IDLE)
             return TB_BUSY;
         for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++)
@@ -177,6 +202,8 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
     case TB_OTA_WRITE: {
         if (!ota_available)
             return TB_IO;
+        if (tb_target_ota_busy())
+            return TB_BUSY;
         enum tb_status status = tb_ota_write(p, f->size);
         *size = tb_ota_status(out);
         return status;
@@ -184,10 +211,14 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
     case TB_OTA_FINISH:
         if (!ota_available)
             return TB_IO;
+        if (tb_target_ota_busy())
+            return TB_BUSY;
         return f->size == 8 ? tb_ota_finish(tb_u64(p)) : TB_INVALID;
     case TB_OTA_ACTIVATE: {
         if (!ota_available || f->size != 8)
             return TB_INVALID;
+        if (tb_target_ota_busy())
+            return TB_BUSY;
         enum tb_status status = tb_ota_activate(tb_u64(p));
         if (status == TB_OK)
             restart_at = now + 500;
@@ -196,22 +227,28 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
     case TB_OTA_ABORT:
         if (!ota_available)
             return TB_IO;
+        if (tb_target_ota_busy())
+            return TB_BUSY;
         return f->size == 8 ? tb_ota_abort(tb_u64(p)) : TB_INVALID;
     case TB_BOOT_CONFIRM:
         if (!empty(f))
             return TB_INVALID;
+        if (tb_target_ota_busy())
+            return TB_BUSY;
         if (!ota_available || !tb_wifi_ready())
             return TB_STATE;
         return tb_ota_confirm();
     case TB_WIFI_SCAN:
         if (!empty(f))
             return TB_INVALID;
-        if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+        if (tb_ota_busy() || tb_target_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
         return tb_wifi_scan(out, size, now);
     case TB_BAND_PREPARE: {
-        if (f->size != 60 || tb_u16(p + 10) || tb_ota_busy() || p[9] != tb_wifi_channel())
+        if (f->size != 60 || tb_u16(p + 10) || p[9] != tb_wifi_channel())
             return TB_INVALID;
+        if (tb_ota_busy() || tb_target_ota_busy())
+            return TB_BUSY;
         for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++)
             if (tb_pin_config[i].count)
                 return TB_BUSY;
@@ -335,7 +372,7 @@ static esp_err_t rpc(httpd_req_t *request)
         enum tb_status status = dispatch(&frame, response_buffer + TB_HEADER_SIZE, &size, now);
         response_size = tb_encode(response_buffer, &frame, status, size);
         if (status == TB_OK && frame.op != TB_INFO && frame.op != TB_CONFIG && frame.op != TB_OTA_STATUS &&
-            frame.op != TB_WIFI_SCAN && frame.op != TB_TARGET_INFO) {
+            frame.op != TB_WIFI_SCAN && frame.op != TB_TARGET_INFO && frame.op != TB_TARGET_OTA_STATUS) {
             memcpy(previous_request, request_buffer, received);
             previous_size = received;
             memcpy(previous_response, response_buffer, response_size);
@@ -434,6 +471,9 @@ esp_err_t tb_service_start(void)
     ota_available = status == ESP_OK;
     if (!ota_available)
         ESP_LOGE("ota", "Journal unavailable: %s; updates disabled", esp_err_to_name(status));
+    enum tb_status target_status = tb_target_ota_init();
+    if (target_status != TB_OK)
+        ESP_LOGE("target_ota", "Recovery journal unavailable (%d); target resources locked", target_status);
     if (tb_ota_pending_boot())
         boot_deadline = now_ms() + 45000;
     httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
