@@ -193,3 +193,12 @@ test('OTA timeout tells the operator to read status and retry the same files for
   assert.match(error.message, /重新选择相同 manifest 和镜像/);
   assert.match(view.document.getElementById('upload-state').textContent, /相同 manifest 和镜像/);
 });
+
+test('acknowledged OTA state replaces stale device and detail state before status refresh', async () => {
+  const view = await page();
+  const old = { jobId: '1', phase: 1, received: 16384, checkpoint: 16384, total: 32768, pendingBoot: false };
+  const verified = { jobId: '2', phase: 2, received: 32768, checkpoint: 32768, total: 32768, pendingBoot: false };
+  view.run('devices = [{ id: "c5", ota: ' + JSON.stringify(old) + ' }]; details.set("c5", { info: {}, ota: ' + JSON.stringify(old) + ', pins: [] }); cacheOta("c5", ' + JSON.stringify(verified) + ')');
+  assert.deepEqual(JSON.parse(JSON.stringify(view.run('devices[0].ota'))), verified);
+  assert.deepEqual(JSON.parse(JSON.stringify(view.run('details.get("c5").ota'))), verified);
+});

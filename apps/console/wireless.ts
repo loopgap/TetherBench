@@ -182,6 +182,10 @@ function renderDevice(): void {
     + `<nav class="workspace-tabs" aria-label="设备功能">${Object.entries(VIEWS).map(([view, label]) => `<a href="${link(device.id, view)}" ${view === route.view ? 'aria-current="page"' : ''}>${label}</a>`).join('')}</nav>` + content;
 }
 async function readStatus(id: string): Promise<void> { const value = await api<C5Status>(path(id)); details.set(id, value); const device = devices.find((d) => d.id === id); if (device) { device.info = value.info; device.ota = value.ota; } }
+function cacheOta(id: string, ota: C5Ota): void {
+  const detail = details.get(id); if (detail) details.set(id, { ...detail, ota });
+  const device = devices.find((item) => item.id === id); if (device) device.ota = ota;
+}
 async function refresh({ discover = false, paint = true } = {}) {
   if (refreshing) return; refreshing = true;
   try {
@@ -217,6 +221,7 @@ root.addEventListener('click', (event) => {
     const value = await command(id, action, action.startsWith('ota/') ? { jobId: ota?.jobId } : {});
     if (action === 'wifi/scan') { outputs.set(id + ':scan', JSON.stringify(decodeScan(value.data), null, 2)); report('扫描结果已读取。'); }
     else if (action === 'reboot' || action === 'ota/activate') { delete sessions[id]; details.delete(id); remember(); report('设备正在重启，请重新发现后获取会话。'); }
+    else if (action === 'ota/abort') { cacheOta(id, { jobId: '0', phase: 0, received: 0, checkpoint: 0, total: 0, pendingBoot: false }); await readStatus(id); report('更新任务已中止。'); }
     else { await readStatus(id); report('操作已完成。'); }
   });
 });
@@ -265,7 +270,7 @@ root.addEventListener('submit', (event) => {
       await api(path(id, '/pins'), 'PUT', { sessionId: sessions[id]?.id, ...value }); await readStatus(id); drafts.delete(JSON.stringify(route)); report('引脚配置已应用。');
     } else if (type === 'bus') { const protocol = Number(data.get('protocol')); output(id, type, await command(id, 'bus', { protocol, data: hexText(data.get('data')), address: protocol === 4 ? Number(data.get('address')) : 0, receive: Number(data.get('receive')), timeoutMs: Number(data.get('timeoutMs')) })); report('协议事务已完成。'); }
     else if (type === 'dap') { output(id, type, await command(id, 'dap', { data: hexText(data.get('dap-data')) })); report('CMSIS-DAP 响应已收到。'); }
-    else if (type === 'ota') { const manifest = data.get('manifest'), image = data.get('image'); if (!(manifest instanceof File) || !(image instanceof File)) throw new Error('请选择签名 manifest 和 C5 固件镜像。'); if (manifest.size !== 176 || image.size < 288 || image.size > 0x1e0000) throw new Error('manifest 必须为 176 B，镜像须符合 C5 分区大小。'); await upload(id, manifest, image); await readStatus(id); report('镜像已由设备校验，可以单独激活。'); }
+    else if (type === 'ota') { const manifest = data.get('manifest'), image = data.get('image'); if (!(manifest instanceof File) || !(image instanceof File)) throw new Error('请选择签名 manifest 和 C5 固件镜像。'); if (manifest.size !== 176 || image.size < 288 || image.size > 0x1e0000) throw new Error('manifest 必须为 176 B，镜像须符合 C5 分区大小。'); cacheOta(id, await upload(id, manifest, image)); await readStatus(id); report('镜像已由设备校验，可以单独激活。'); }
     else if (type === 'band') {
       const peerId = data.get('peerId');
       const result = await api<C5BandResult>(path(id, '/wifi/negotiate'), 'POST', { sessionId: sessions[id]?.id, peerId }, 60000);
