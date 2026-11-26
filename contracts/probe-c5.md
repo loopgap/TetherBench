@@ -10,6 +10,6 @@
 - C5 可配置为 STA 或独立 SoftAP；AP 与 STA 不同时运行。AP 模式凭据保存在本机 `.local/ap-network.json`，并以 `INFO.wifi.ap` 标识；单射频一次只有一个频段/信道。AP/STA 配对的 Gateway 自动切频协商尚未验收，当前 Gateway 仅接受 STA 角色。
 - 租约统一拥有目标资源，到期后释放。负载上限 4096 字节，DAP 上限 1024 字节。
 - 网络 CMSIS-DAP 不等于 USB 枚举。OpenOCD、虚拟 USB、CDC 等适配需独立实现和互操作证据。
-- 当前 OTA 版本只支持 C5 自身。外部 MCU OTA 契约见 [Target MCU OTA v1](target-mcu-ota.md)；C5 已实现只读的 opcode 39 `TARGET_INFO` 能力查询，更新 opcodes 40..45 尚未实现，不能据此宣称支持外接 MCU OTA。
+- C5 自身双槽 OTA 已实现。外部 MCU OTA 契约见 [Target MCU OTA v1](target-mcu-ota.md)；C5 端已实现 opcode 39..45 的 UART/SPI 转发、manifest 预检和持久资源锁。目标 MCU bootloader、其独立验签与回滚能力、支持板型及 UART/SPI 实机闭环尚未实现或验证，不能据此宣称目标 MCU OTA 已可用。
 
 产品版本仍以 `VERSION` 为单一来源。线协议版本独立，不兼容变更必须升级线协议版本。
