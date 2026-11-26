@@ -1,6 +1,6 @@
 # Target MCU OTA protocol v1
 
-Date: 2026-11-27. Status: C5 frame codecs and signed-manifest structure/signature validation exist; RPC transport, durable lock, and target bootloader are not implemented.
+Date: 2026-11-27. Status: C5 frame codecs, HELLO/status parsers, and signed-manifest structure/signature validation exist; RPC transport, durable lock, and target bootloader are not implemented.
 
 This contract defines updates of an MCU connected to Probe C5 over the configured UART or SPI bus. It does not describe C5's own dual-slot ESP-IDF OTA, CMSIS-DAP/SWD programming, or arbitrary raw bus access. The C5 cross-project entry remains [contracts/probe-c5.md](probe-c5.md).
 

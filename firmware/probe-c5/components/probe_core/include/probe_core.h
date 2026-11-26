@@ -14,6 +14,9 @@ extern "C" {
 #define TB_MANIFEST_SIGNED_SIZE 176u
 #define TB_TARGET_MANIFEST_SIGNED_SIZE 120u
 #define TB_TARGET_MANIFEST_SIZE 184u
+#define TB_TARGET_HELLO_SIZE 180u
+#define TB_TARGET_STATUS_SIZE 64u
+#define TB_TARGET_CAPABILITY_MASK 0xffu
 #define TB_BAND_CONFIRM_MIN_RSSI (-80)
 #define TB_BOARD_ID "esp32c5-n4"
 #define TB_TARGET_PAYLOAD_MAX 997u
@@ -90,6 +93,24 @@ enum tb_target_status
     TB_TARGET_CONFLICT,
     TB_TARGET_TIMEOUT
 };
+enum tb_target_phase
+{
+    TB_TARGET_EMPTY,
+    TB_TARGET_RECEIVING,
+    TB_TARGET_VERIFIED,
+    TB_TARGET_TRIAL,
+    TB_TARGET_CONFIRMED,
+    TB_TARGET_ABORTED,
+    TB_TARGET_ROLLED_BACK,
+    TB_TARGET_FAILED
+};
+enum tb_target_boot_result
+{
+    TB_TARGET_BOOT_NONE,
+    TB_TARGET_BOOT_TRIAL_PENDING,
+    TB_TARGET_BOOT_CONFIRMED,
+    TB_TARGET_BOOT_ROLLED_BACK
+};
 struct tb_frame
 {
     uint8_t op;
@@ -104,6 +125,22 @@ struct tb_target_frame
     uint32_t sequence;
     const uint8_t *data;
     size_t size;
+};
+struct tb_target_status_record
+{
+    uint64_t job_id, rollback_index;
+    uint8_t phase, boot_result;
+    uint32_t received, checkpoint, total;
+    char active_version[32];
+};
+struct tb_target_hello
+{
+    uint16_t protocol_major, protocol_minor, max_data_chunk;
+    uint32_t capabilities, max_image_length;
+    char board_id[32], active_version[32], bootloader_version[16];
+    uint8_t unique_id[12];
+    uint64_t rollback_index;
+    struct tb_target_status_record update;
 };
 struct tb_pins
 {
@@ -158,6 +195,8 @@ enum tb_status tb_target_uart_decode(const uint8_t *wire, size_t size, struct tb
 size_t tb_target_spi_encode(const struct tb_target_frame *frame, uint8_t wire[TB_TARGET_SPI_SIZE]);
 enum tb_status tb_target_spi_decode(const uint8_t *wire, size_t size, struct tb_target_frame *frame,
                                     uint8_t payload[TB_TARGET_PAYLOAD_MAX]);
+enum tb_status tb_target_status_decode(const uint8_t *wire, size_t size, struct tb_target_status_record *status);
+enum tb_status tb_target_hello_decode(const uint8_t *wire, size_t size, struct tb_target_hello *hello);
 enum tb_status tb_acquire(struct tb_lease *l, uint64_t now, uint64_t id, uint32_t ttl);
 bool tb_owned(const struct tb_lease *l, uint64_t now, uint64_t id);
 enum tb_status tb_renew(struct tb_lease *l, uint64_t now, uint64_t id, uint32_t ttl);

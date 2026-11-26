@@ -85,6 +85,66 @@ static size_t target_pack(const struct tb_target_frame *frame, uint8_t *packet, 
     tb_put32(packet + 16 + frame->size, tb_crc32(packet, 16 + frame->size));
     return 20 + frame->size;
 }
+static bool target_string_valid(const uint8_t *text, size_t size)
+{
+    const uint8_t *end = memchr(text, 0, size);
+    if (!end)
+        return false;
+    for (const uint8_t *p = end + 1; p < text + size; p++)
+        if (*p)
+            return false;
+    return true;
+}
+enum tb_status tb_target_status_decode(const uint8_t *wire, size_t size, struct tb_target_status_record *status)
+{
+    if (!wire || !status || size != TB_TARGET_STATUS_SIZE || tb_u16(wire + 10) || wire[8] > TB_TARGET_FAILED ||
+        wire[9] > TB_TARGET_BOOT_ROLLED_BACK)
+        return TB_INVALID;
+    uint64_t job_id = tb_u64(wire);
+    uint32_t received = tb_u32(wire + 12), checkpoint = tb_u32(wire + 16), total = tb_u32(wire + 20);
+    if (!job_id) {
+        for (size_t i = 0; i < size; i++)
+            if (wire[i])
+                return TB_INVALID;
+    } else if (wire[8] == TB_TARGET_EMPTY || !total || received > total || checkpoint > received ||
+               !target_string_valid(wire + 32, 32)) {
+        return TB_INVALID;
+    }
+    *status = (struct tb_target_status_record){.job_id = job_id,
+                                               .phase = wire[8],
+                                               .boot_result = wire[9],
+                                               .received = received,
+                                               .checkpoint = checkpoint,
+                                               .total = total,
+                                               .rollback_index = tb_u64(wire + 24)};
+    memcpy(status->active_version, wire + 32, sizeof status->active_version);
+    return TB_OK;
+}
+enum tb_status tb_target_hello_decode(const uint8_t *wire, size_t size, struct tb_target_hello *hello)
+{
+    if (!wire || !hello || size != TB_TARGET_HELLO_SIZE || tb_u16(wire + 14) ||
+        (tb_u32(wire + 4) & ~TB_TARGET_CAPABILITY_MASK) || !tb_u32(wire + 8) || !tb_u16(wire + 12) ||
+        tb_u16(wire + 12) > 983 || !target_string_valid(wire + 16, 32) || !target_string_valid(wire + 48, 32) ||
+        !target_string_valid(wire + 80, 16))
+        return TB_INVALID;
+    if (tb_u16(wire) != 1)
+        return TB_UNSUPPORTED;
+    struct tb_target_hello result = {.protocol_major = tb_u16(wire),
+                                     .protocol_minor = tb_u16(wire + 2),
+                                     .capabilities = tb_u32(wire + 4),
+                                     .max_image_length = tb_u32(wire + 8),
+                                     .max_data_chunk = tb_u16(wire + 12),
+                                     .rollback_index = tb_u64(wire + 108)};
+    memcpy(result.board_id, wire + 16, sizeof result.board_id);
+    memcpy(result.active_version, wire + 48, sizeof result.active_version);
+    memcpy(result.bootloader_version, wire + 80, sizeof result.bootloader_version);
+    memcpy(result.unique_id, wire + 96, sizeof result.unique_id);
+    enum tb_status status = tb_target_status_decode(wire + 116, TB_TARGET_STATUS_SIZE, &result.update);
+    if (status != TB_OK)
+        return status;
+    *hello = result;
+    return TB_OK;
+}
 static enum tb_status target_parse(const uint8_t *packet, size_t size, struct tb_target_frame *frame,
                                    uint8_t payload[TB_TARGET_PAYLOAD_MAX])
 {

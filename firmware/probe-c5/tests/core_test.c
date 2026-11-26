@@ -233,6 +233,52 @@ static void target_frames(void)
     frame.sequence = 0;
     assert(tb_target_uart_encode(&frame, uart, sizeof uart) == 0);
 }
+static void target_records(void)
+{
+    uint8_t hello_wire[TB_TARGET_HELLO_SIZE] = {0};
+    tb_put16(hello_wire, 1);
+    tb_put32(hello_wire + 4, TB_TARGET_CAPABILITY_MASK);
+    tb_put32(hello_wire + 8, 65536);
+    tb_put16(hello_wire + 12, 983);
+    memcpy(hello_wire + 16, "test-mcu", 9);
+    memcpy(hello_wire + 48, "1.0", 4);
+    memcpy(hello_wire + 80, "boot-1", 7);
+    memset(hello_wire + 96, 0x5a, 12);
+    tb_put64(hello_wire + 108, 9);
+    struct tb_target_hello hello;
+    assert(tb_target_hello_decode(hello_wire, sizeof hello_wire, &hello) == TB_OK);
+    assert(hello.protocol_major == 1 && hello.max_data_chunk == 983 && hello.rollback_index == 9 &&
+           !strcmp(hello.board_id, "test-mcu") && hello.update.phase == TB_TARGET_EMPTY);
+    assert(tb_target_hello_decode(hello_wire, sizeof hello_wire - 1, &hello) == TB_INVALID);
+    tb_put32(hello_wire + 4, TB_TARGET_CAPABILITY_MASK | 0x100);
+    assert(tb_target_hello_decode(hello_wire, sizeof hello_wire, &hello) == TB_INVALID);
+    tb_put32(hello_wire + 4, TB_TARGET_CAPABILITY_MASK);
+    tb_put16(hello_wire + 14, 1);
+    assert(tb_target_hello_decode(hello_wire, sizeof hello_wire, &hello) == TB_INVALID);
+    tb_put16(hello_wire + 14, 0);
+    tb_put16(hello_wire, 2);
+    assert(tb_target_hello_decode(hello_wire, sizeof hello_wire, &hello) == TB_UNSUPPORTED);
+    tb_put16(hello_wire, 1);
+    memset(hello_wire + 16, 'x', 32);
+    assert(tb_target_hello_decode(hello_wire, sizeof hello_wire, &hello) == TB_INVALID);
+
+    uint8_t status_wire[TB_TARGET_STATUS_SIZE] = {0};
+    struct tb_target_status_record status;
+    tb_put64(status_wire, 7);
+    status_wire[8] = TB_TARGET_RECEIVING;
+    tb_put32(status_wire + 12, 2048);
+    tb_put32(status_wire + 16, 1024);
+    tb_put32(status_wire + 20, 4096);
+    tb_put64(status_wire + 24, 8);
+    memcpy(status_wire + 32, "1.0", 4);
+    assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_OK);
+    assert(status.job_id == 7 && status.checkpoint == 1024 && status.rollback_index == 8);
+    tb_put32(status_wire + 16, 4096);
+    assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);
+    memset(status_wire, 0, sizeof status_wire);
+    tb_put64(status_wire, 7);
+    assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);
+}
 int main(void)
 {
     frames();
@@ -242,5 +288,6 @@ int main(void)
     bands();
     wireless_rssi();
     target_frames();
-    puts("core: frame, lease, pin, DAP, band, RSSI and target OTA checks passed");
+    target_records();
+    puts("core: frame, lease, pin, DAP, band, RSSI and target OTA contract checks passed");
 }
