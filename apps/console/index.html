@@ -24,6 +24,14 @@
       <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
       <symbol id="icon-back" viewBox="0 0 24 24"><path d="M20 12H5m6-6-6 6 6 6"/></symbol>
       <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.7-4L3 10m0-5v5h5M4 13a8 8 0 0 0 14.7 4L21 14m0 5v-5h-5"/></symbol>
+      <symbol id="icon-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M7.1 5.6a8 8 0 1 0 9.8 0"/></symbol>
+      <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></symbol>
+      <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+      <symbol id="icon-sliders" viewBox="0 0 24 24"><path d="M4 6h6m4 0h6M4 12h2m4 0h10M4 18h10m4 0h2"/><circle cx="12" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-2.8 7.7-7 10-4.2-2.3-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="icon-swap" viewBox="0 0 24 24"><path d="M4 7h13m0 0-3-3m3 3-3 3M20 17H7m0 0 3-3m-3 3 3 3"/></symbol>
     </svg>
     <header class="topbar">
       <div class="brand">
@@ -67,8 +75,8 @@
           <p class="subheading">已连接的探针与活动调试会话</p>
         </div>
         <div class="toolbar">
-          <button class="button button-secondary" id="refresh-button" type="button">刷新</button>
-          <button class="button button-primary" id="connect-button" type="button">添加浏览器模拟探针</button>
+          <button class="button button-secondary" id="refresh-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-refresh"></use></svg>刷新</button>
+          <button class="button button-primary" id="connect-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-link"></use></svg>添加浏览器模拟探针</button>
         </div>
       </section>
 
@@ -101,15 +109,15 @@
             <span id="selected-id" class="muted">未选择设备</span>
           </div>
           <div class="session-actions">
-            <button class="button button-secondary" id="acquire-button" type="button" disabled>获取会话</button>
-            <button class="button button-secondary" id="release-button" type="button" disabled>释放会话</button>
-            <button class="button button-danger" id="disconnect-button" type="button" disabled>断开探针</button>
+            <button class="button button-secondary" id="acquire-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#icon-link"></use></svg>获取会话</button>
+            <button class="button button-secondary" id="release-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#icon-stop"></use></svg>释放会话</button>
+            <button class="button button-danger" id="disconnect-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#icon-power"></use></svg>断开探针</button>
           </div>
           <form id="exchange-form" class="exchange-form">
             <label for="exchange-data">测试数据</label>
             <div class="exchange-controls">
               <input id="exchange-data" name="data" maxlength="4096" value="probe status" autocomplete="off">
-              <button class="button button-primary" id="exchange-button" type="submit" disabled>发送</button>
+              <button class="button button-primary" id="exchange-button" type="submit" disabled><svg class="icon" aria-hidden="true"><use href="#icon-arrow"></use></svg>发送</button>
             </div>
             <p class="muted">原型最多回显 4096 字节 UTF-8 数据，不会产生 CMSIS-DAP 调试流量。</p>
           </form>
