@@ -2,15 +2,22 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
-import { createGatewayServer } from '../apps/gateway/server.mjs';
-import { startSimulator } from '../apps/simulator/probe.mjs';
+import type { Server } from 'node:http';
+import { createGatewayServer } from '../apps/gateway/server.ts';
+import { startSimulator } from '../apps/simulator/probe.ts';
+
+function loopbackUrl(server: Server): string {
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected an active TCP listener.');
+  return `http://127.0.0.1:${address.port}`;
+}
 
 test('simulator registers again after its device disappears and stops without leaving ownership', async () => {
   const server = createGatewayServer();
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  const baseUrl = 'http://127.0.0.1:' + server.address().port;
-  const errors = [];
+  const baseUrl = loopbackUrl(server);
+  const errors: unknown[] = [];
   let stop;
   try {
     stop = await startSimulator({ baseUrl, deviceId: 'reconnect', intervalMs: 10,
@@ -20,7 +27,7 @@ test('simulator registers again after its device disappears and stops without le
     let count = 0;
     while (Date.now() < deadline && count !== 1) {
       await delay(15);
-      count = (await (await fetch(baseUrl + '/api/v1/devices')).json()).devices.length;
+      count = ((await (await fetch(baseUrl + '/api/v1/devices')).json()) as { devices: unknown[] }).devices.length;
     }
     assert.equal(count, 1);
     assert.deepEqual(errors, []);

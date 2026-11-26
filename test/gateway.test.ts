@@ -1,39 +1,51 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { after, before, describe, it } from 'node:test';
-import { createGatewayServer } from '../apps/gateway/server.mjs';
+import type { Server } from 'node:http';
+import { createGatewayServer } from '../apps/gateway/server.ts';
 
-const vectors = JSON.parse(await readFile(new URL('../contracts/test-vectors/mock-gateway.json', import.meta.url), 'utf8'));
+const vectors = JSON.parse(await readFile(new URL('../contracts/test-vectors/mock-gateway.json', import.meta.url), 'utf8')) as {
+  device: { id: string; name: string; capabilities: string[] }; exchange: { data: string };
+};
 const projectVersion = (await readFile(new URL('../VERSION', import.meta.url), 'utf8')).trim();
-const packageManifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-let server;
-let baseUrl;
+const packageManifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+let server: Server | undefined;
+let baseUrl = '';
+type ApiResult = { status: number; body: any };
+type ApiOptions = { method?: string; body?: unknown; headers?: Record<string, string> };
+
+function loopbackUrl(activeServer: Server): string {
+  const address = activeServer.address();
+  if (!address || typeof address === 'string') throw new Error('Expected an active TCP listener.');
+  return `http://127.0.0.1:${address.port}`;
+}
 
 it('uses VERSION as the only project-version source', () => {
   assert.equal(Object.hasOwn(packageManifest, 'version'), false);
 });
 
-async function start(options) {
-  server = createGatewayServer(options);
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
+async function start(options: Parameters<typeof createGatewayServer>[0] = {}): Promise<void> {
+  const activeServer = createGatewayServer(options); server = activeServer;
+  await new Promise<void>((resolve, reject) => {
+    activeServer.once('error', reject);
+    activeServer.listen(0, '127.0.0.1', () => resolve());
   });
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  baseUrl = loopbackUrl(activeServer);
 }
 
-async function stop() {
-  if (!server?.listening) return;
-  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+async function stop(): Promise<void> {
+  const activeServer = server;
+  if (!activeServer?.listening) return;
+  await new Promise<void>((resolve, reject) => activeServer.close((error) => error ? reject(error) : resolve()));
 }
 
-async function api(path, { method = 'GET', body, headers = {} } = {}) {
+async function api(path: string, { method = 'GET', body, headers = {} }: ApiOptions = {}): Promise<ApiResult> {
   const response = await fetch(new URL(path, baseUrl), {
     method,
     headers: body === undefined ? headers : { 'Content-Type': 'application/json', ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: response.status, body: response.status === 204 ? null : await response.json() };
+  return { status: response.status, body: response.status === 204 ? null : await response.json() as any };
 }
 
 describe('local Gateway prototype', () => {
@@ -43,8 +55,8 @@ describe('local Gateway prototype', () => {
   it('serves the console and reports that this is a prototype', async () => {
     const page = await fetch(baseUrl);
     assert.equal(page.status, 200);
-    assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
-    assert.match(await page.text(), /Probe inventory/);
+    assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+    assert.match(await page.text(), /设备清单/);
     assert.deepEqual((await api('/api/v1/health')).body, {
       state: 'prototype', version: projectVersion, devices: 0, sessions: 0,
     });

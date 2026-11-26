@@ -6,9 +6,16 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node apps/gateway/server.mjs",
-    "simulate": "node apps/simulator/probe.mjs",
-    "test": "node --test",
-    "check": "node --check apps/gateway/server.mjs && node --check apps/simulator/probe.mjs && node --check apps/console/app.js && node --test"
+    "dev": "npm run build:web && node apps/gateway/server.ts",
+    "simulate": "node apps/simulator/probe.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "build:web": "tsc -p tsconfig.web.json",
+    "build": "npm run typecheck && npm run build:web",
+    "test": "npm run build:web && node --test",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.4",
+    "typescript": "^7.0.2"
   }
 }
