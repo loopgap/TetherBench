@@ -3,6 +3,7 @@
 #include "probe_dap.h"
 #include "probe_io.h"
 #include "probe_ota.h"
+#include "probe_target_ota.h"
 #include "probe_wifi.h"
 #include "device_config.h"
 #include "esp_app_desc.h"
@@ -152,6 +153,15 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
         return tb_io_bus(p, f->size, out, size);
+    case TB_TARGET_INFO:
+        if (f->size != 1 || (p[0] != TB_UART && p[0] != TB_SPI))
+            return TB_INVALID;
+        if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+            return TB_BUSY;
+        for (unsigned i = TB_UART; i <= TB_SPI; i++)
+            if (i != p[0] && tb_pin_config[i].count)
+                return TB_BUSY;
+        return tb_target_ota_info(p[0], out, size);
     case TB_OTA_BEGIN: {
         if (!ota_available)
             return TB_IO;
@@ -325,7 +335,7 @@ static esp_err_t rpc(httpd_req_t *request)
         enum tb_status status = dispatch(&frame, response_buffer + TB_HEADER_SIZE, &size, now);
         response_size = tb_encode(response_buffer, &frame, status, size);
         if (status == TB_OK && frame.op != TB_INFO && frame.op != TB_CONFIG && frame.op != TB_OTA_STATUS &&
-            frame.op != TB_WIFI_SCAN) {
+            frame.op != TB_WIFI_SCAN && frame.op != TB_TARGET_INFO) {
             memcpy(previous_request, request_buffer, received);
             previous_size = received;
             memcpy(previous_response, response_buffer, response_size);

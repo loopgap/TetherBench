@@ -17,6 +17,13 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
                     "-I", str(CORE / "include"), str(CORE / "probe_core.c"),
                     str(ROOT / "tests/core_test.c"), "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
+    target_link = ROOT / "components/probe_target_ota"
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+                    "-I", str(ROOT / "tests/stubs"), "-I", str(CORE / "include"),
+                    "-I", str(target_link / "include"), str(CORE / "probe_core.c"),
+                    str(target_link / "probe_target_ota.c"), str(ROOT / "tests/target_link_test.c"),
+                    "-o", str(executable)], check=True)
+    subprocess.run([str(executable)], check=True, timeout=15)
     subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
                     "-I", str(ROOT / "tests/stubs"), "-I", str(CORE / "include"),
                     "-I", str(ROOT / "components/probe_ota/include"),
