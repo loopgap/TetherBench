@@ -1,0 +1,35 @@
+[components/**/*.c]
+indent_style = space
+indent_size = 4
+
+[components/**/*.h]
+indent_style = space
+indent_size = 4
+
+[main/**/*.cpp]
+indent_style = space
+indent_size = 4
+
+[tests/**/*.c]
+indent_style = space
+indent_size = 4
+
+[tests/**/*.h]
+indent_style = space
+indent_size = 4
+
+[tools/**/*.py]
+indent_style = space
+indent_size = 4
+
+[tests/**/*.py]
+indent_style = space
+indent_size = 4
+
+[components/**/CMakeLists.txt]
+indent_style = space
+indent_size = 4
+
+[main/CMakeLists.txt]
+indent_style = space
+indent_size = 4

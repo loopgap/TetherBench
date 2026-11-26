@@ -1,0 +1,9 @@
+components/** text eol=lf
+main/** text eol=lf
+tests/** text eol=lf
+tools/** text eol=lf
+docs/** text eol=lf
+README.md text eol=lf
+.clang-format text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
