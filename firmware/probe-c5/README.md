@@ -1,12 +1,12 @@
 # Probe C5
 
-共享 ESP32-C5 N4 固件使用 ESP-IDF 6.1.1 独立构建，版本读取根目录 `VERSION`。已实现 TLS 二进制 RPC、UDP 发现、独占租约、可配置 SWD/UART/SPI/I2C、官方 Arm CMSIS-DAP 核心及签名双槽 OTA。双频状态机已有实现；自动双方测量、外部 MCU 更新适配和虚拟 USB 尚未完成。
+共享 ESP32-C5 N4 固件使用 ESP-IDF 6.1.1 独立构建，版本读取根目录 `VERSION`。已实现 TLS 二进制 RPC、UDP 发现、独占租约、可配置 SWD/UART/SPI/I2C、官方 Arm CMSIS-DAP 核心及签名双槽 OTA。Gateway 已实现双 STA 共同信道测量与协调；C5 AP+STA 协商、外部 MCU 更新适配和真实 USB 枚举尚未完成。
 
 跨工程入口：[C5 契约](../../contracts/probe-c5.md)。详细字段和恢复行为：[协议](docs/protocol.md)。验证结果：[验收记录](docs/validation.md)。第三方版本及补丁：[CMSIS-DAP 来源](third_party/CMSIS-DAP/UPSTREAM.md)。
 
 `main/` 存放固件；`tools/` 和 `tests/` 存放本工程工具与回归；`docs/` 存放 C5 详细文档。`.local/` 的凭据、私钥、Flash 备份和本机配置，以及 `build/` 的编译输出均不提交。N4 只表示 4 MiB Flash，没有确认具体开发板外部电路；默认不分配目标引脚。
 
-先读取并启动 Windows 已配置的热点，再生成本机凭据和构建。WinRT 热点脚本需要 Windows PowerShell 5；路径是 2026-11-26 本机确认值，其他机器通过脚本参数指定环境：
+STA 模式先读取并启动 Windows 已配置的热点，再生成本机凭据和构建。AP 模式直接运行 `provision.py --ap`，不要求热点配置。WinRT 热点脚本需要 Windows PowerShell 5；路径是 2026-11-26 本机确认值，其他机器通过脚本参数指定环境：
 
 ```powershell
 powershell.exe -NoProfile -File firmware/probe-c5/tools/windows_hotspot.ps1 -Start
@@ -14,7 +14,7 @@ powershell.exe -NoProfile -File firmware/probe-c5/tools/windows_hotspot.ps1 -Sta
 & firmware/probe-c5/tools/build.ps1
 ```
 
-`provision.py --ap` 配置此 C5 为 AP；默认 STA。两者读取 `.local/wifi.json`，不打印网络密码。STA 必须实际协商 HE20，否则断开并退避重连。热点已经启动不代表它支持 Wi-Fi 6。客户端在发送令牌前核对预置的完整 DER 证书，发现报文不能建立信任。每台板卡应使用独立密钥和配置。
+`provision.py --ap` 配置此 C5 为独立 Wi-Fi 6 AP；默认 STA。STA 从 `.local/wifi.json` 读取热点凭据。AP 模式无需上行热点，首次配置时生成独立网络凭据，保存在忽略提交的 `.local/ap-network.json` 并在重配时复用；连接设备时从该本机文件读取，工具不会打印密码。C5 单射频一次只工作在一个信道，AP 可按协商结果经 CSA 通知客户端切频，不是同时运行 2.4 GHz 和 5 GHz。STA 必须实际协商 HE20，否则断开并退避重连。热点已经启动不代表它支持 Wi-Fi 6。客户端在发送令牌前核对预置的完整 DER 证书，发现报文不能建立信任。每台板卡应使用独立密钥和配置。
 
 首次烧录前确认芯片身份并备份完整 Flash。构建脚本的 `-Flash -Port COM7` 会烧录；本机已备份 4194304 字节至 `.local/original-flash.bin`。分区表保留原 NVS 的 `0x9000/0x6000` 边界。
 

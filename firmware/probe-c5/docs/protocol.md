@@ -8,7 +8,7 @@ HTTPS TCP 443，`POST /v1/rpc`，请求与响应 `Content-Type: application/octe
 
 设备使用本机生成的 P-256 证书。Python 客户端先比较预置 PEM 对应的完整 DER 证书，成功后才发送 HTTP 请求；禁止 HTTP 库隐式重连，每个新 TLS 连接都重新验证。发现回复里的证书摘要只能提供提示，不能自动配对。证书轮换需要受信任的本机配置更新。
 
-最多两个 TLS socket；单 HTTP 任务顺序执行。握手期限 5 秒，收发等待 2 秒，请求体总读取期限约 5 秒。固定请求、响应和最近事务缓冲，没有无限任务队列。局域网攻击者仍可占用连接资源，不能承诺消除无线拒绝服务。
+最多两个 TLS socket；HTTP 服务可并行接收连接，但 RPC 处理器用独立互斥量串行保护固定请求、响应和最近事务缓冲，设备状态仍由控制互斥量保护。握手期限 5 秒，收发等待 2 秒，请求体总读取期限约 5 秒。没有无限任务队列。局域网攻击者仍可占用连接资源，不能承诺消除无线拒绝服务。
 
 | 帧偏移 | 字节数 | 内容 |
 |---|---:|---|
@@ -53,7 +53,7 @@ HTTPS TCP 443，`POST /v1/rpc`，请求与响应 `Content-Type: application/octe
 
 INFO、CONFIG、OTA_STATUS 仅要求有效设备认证，其他操作必须拥有租约，ACQUIRE 除外。租约为随机非零 64 位，TTL 5000..60000 ms。释放、到期、重启会删除驱动并将目标脚设为输入。断开网络连接不等于释放租约。更新任务留在 Flash，可由新的认证租约继续。
 
-INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、leaseActive、allowedPins、freeHeap、minHeap、wifi（ip/ap/channel/rssi/phy）、otaAvailable、pendingBoot、bandStage、capabilities。wifi.phy 是 IDF 枚举值，HE20=5，失败为 -1。AP 的能力检查不能从这个 STA 枚举推断。
+INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、leaseActive、allowedPins、freeHeap、minHeap、wifi（ip/ap/channel/rssi/phy）、otaAvailable、pendingBoot、bandStage、capabilities。STA 模式的 wifi.rssi 是关联 AP 的信号强度；AP 模式返回已关联客户端中的最低 RSSI，未关联或读取失败时为 -127。它表示当前链路，不预测候选信道。wifi.phy 是 STA 协商的 IDF 枚举值，HE20=5，失败为 -1；AP 端能力不能从该字段推断。
 
 ## 引脚与数据事务
 
@@ -68,7 +68,7 @@ INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、l
 
 上限不是实测速度。候选板配置允许 GPIO 0..6、10、15、23，同时强制排除 Flash 16..22、UART0 11/12、USB 13/14、保守保留的 26..28。N4 不足以识别开发板原理图，候选脚是否接外设仍需确认。默认无映射；连接前核对电平、上拉、占用与接地。没有目标供电控制。
 
-opcode 16 DAP：原生 CMSIS-DAP 请求/响应，最大 1024 字节。支持 Info、HostStatus、Connect/Disconnect、TransferConfigure、Transfer、TransferBlock、WriteABORT、Delay、ResetTarget、SWJ_Pins/Clock/Sequence、SWD_Configure/Sequence、最多 16 条命令的 ExecuteCommands。未映射 SWD 时仅允许 Info、HostStatus、Disconnect。没有 JTAG、SWO、CMSIS UART、QueueCommands 和厂商命令。进入 Arm 核心前检查重试、长度和响应预算。C5 本机执行 GPIO，单请求 250 ms 预算，超时后关闭 SWD 并复位核心；软件预算不代替波形测量。
+opcode 16 DAP：原生 CMSIS-DAP 请求/响应，最大 1024 字节。支持 Info、HostStatus、Connect/Disconnect、TransferConfigure、Transfer、TransferBlock、WriteABORT、Delay、ResetTarget、SWJ_Pins/Clock/Sequence、SWD_Configure/Sequence、最多 16 条命令的 ExecuteCommands。Transfer 和 TransferBlock 最多 255 项，并按 1024 字节的实际请求、响应预算进一步限制；例如 block-read 最多 255 个字，block-write 最多 254 个字。Sequence 最多 64 组。TransferConfigure 的 idle_cycles 为 0..32，以限制 1 kHz 时的停顿；wait_retry 和 match_retry 接受完整 u16 范围。未映射 SWD 时仅允许 Info、HostStatus、Disconnect。没有 JTAG、SWO、CMSIS UART、QueueCommands 和厂商命令。C5 本机执行 GPIO，单请求 250 ms 预算；SWD 事务重试逐次检查期限，SWD Sequence 至少每 8 个时钟检查一次。超时后关闭 SWD 并复位核心；软件预算不代替波形测量。
 
 opcode 17 BUS：12 字节头 protocol u8、flags u8=0、address u16、tx_length u16、rx_length u16、timeout_ms u16、reserved u16=0，然后 tx_length 字节。收发各最多 1024，至少一个非零，timeout 1..100 ms。成功响应是接收到的原始字节。
 
@@ -126,17 +126,19 @@ ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日�
 
 ## Wi-Fi 和协商切频
 
-C5 使用双频 AUTO，协议能力含 802.11ax。STA 在得到 IP 后验证 HE20，否则断开，1..30 秒退避。AP 驱逐没有 11ax 能力的客户端；该检查不是 AP 逐帧 PHY 证明。单射频一次只有一个当前信道。
+C5 使用双频 AUTO，协议能力含 802.11ax，但只有一条射频链路，同一时刻只工作于一个频段和信道。默认 STA 从本机配置连接热点，得到 IP 后验证 HE20，否则断开并按 1..30 秒退避。`provision.py --ap` 配置独立 SoftAP，不启用 STA 回程；其 SSID 和随机强密码保存在忽略提交的 `.local/ap-network.json`，可用同一个文件把另一台 C5 配成 STA。AP 启动信道为 6，可按准备好的事务切到允许信道；关联客户端收到信道切换公告。AP 会拒绝不支持 802.11ax 的客户端；关联列表检查不等于逐帧 PHY 证明。
 
-opcode 48 WIFI_SCAN：空请求，首次启动异步扫描返回 BUSY，完成后再调用返回 count u32 加最多 16 条 12 字节：BSSID[6]、channel u8、rssi i8、phy_11ax u8、authmode u8、reserved[2]=0。仅扫描配置的 SSID。结果读取后释放，下次重扫。扫描不能代替候选链路 RTT/丢包测量。
+INFO 的 `wifi.ap` 标明独立 AP 角色。STA 的 `wifi.ip` 是上行地址，`wifi.rssi` 和 `wifi.phy` 表示关联 AP 的链路；AP 的 `wifi.ip` 是本机 AP 地址，`wifi.rssi` 是关联客户端中最弱的读数，`wifi.phy=-1`，因为设备自身没有 STA 上行链路。AP 模式要求至少一个关联且都支持 11ax 的客户端，才允许 BAND_CONFIRM。Gateway 当前自动协商只接受 STA 角色；AP/STA 配对协商尚未完成端到端验收。
 
-opcode 49 BAND_PREPARE：transaction_id u64、candidate_channel u8、current_channel u8、reserved u16=0，再接四条 link，共 60 字节。link 顺序为当前本端、当前对端、候选本端、候选对端；每条 rssi i16、loss_permille u16、rtt_ms u16、samples u16、age_ms u32。至少 5 样本、不超过 5 秒；RSSI -110..-1 dBm、丢包 0..1000 千分比、RTT 0..5000 ms。
+opcode 48 WIFI_SCAN：空请求，首次启动异步扫描并连续进行五轮有界主动扫描，期间返回 BUSY；完成后返回 count u32 加最多 16 条 16 字节：BSSID[6]、channel u8、五次观测的中位 RSSI i8、五次均支持时为 1 的 phy_11ax u8、authmode u8、实际观测次数 u8、reserved u8=0、最早样本年龄 age_ms u32。STA 只扫描配置的目标 SSID；独立 AP 扫描可见网络以评估候选信道。单轮超过 5 秒或驱动错误丢弃整组结果。读取后释放，下次调用重新扫描。Gateway 可用 sightings/5 估算扫描漏检率；STA 共同候选按信道匹配，两个频段可以使用不同 BSSID。年龄和样本新鲜度用于拒绝超过 30 秒的扫描结果，扫描不能代替当前链路 RTT/丢包测量。
+
+opcode 49 BAND_PREPARE：transaction_id u64、candidate_channel u8、current_channel u8、reserved u16=0，再接四条 link，共 60 字节。link 顺序为当前本端、当前对端、候选本端、候选对端；每条 rssi i16、loss_permille u16、rtt_ms u16、samples u16、age_ms u32。至少 5 样本、年龄不超过 30 秒；RSSI -110..-1 dBm、丢包 0..1000 千分比。当前链路 RTT 为 0..5000 ms；候选信道来自相邻扫描结果，rtt_ms=0xffff 表示无主动 RTT 样本，评分只使用 RSSI 和扫描未命中率，不得用该值标记当前链路。
 
 采用两端最差分数：RSSI 在 -90..-40 dBm 映射到 0..100，减去 loss_permille/10 和 rtt_ms/5，整数截断。候选至少改善 10 分；成功后驻留 30 秒。允许信道 1..11、36、40、44、48，仍受地区规则和驱动约束。
 
-opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64，要求网络就绪且实际信道等于候选。opcode 52 BAND_CANCEL：transaction_id u64，已切换且未确认时恢复旧信道。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED。
+opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64；设备要求网络已就绪、实际信道匹配、RSSI 至少 -80 dBm，且 STA 协商到 HE20；AP 模式要求至少一个已关联的 11ax 客户端且所有关联客户端均支持 11ax。任一条件不满足就拒绝确认，等待自动回退；成功后进入 CONFIRMED，暂留 15 秒补偿窗口。opcode 52 BAND_CANCEL：transaction_id u64，可取消 PREPARED/COMMITTED 阶段；已切换或已确认且仍在 15 秒窗口内时恢复旧信道；重复取消为幂等操作。opcode 53 BAND_FINALIZE：transaction_id u64，双端都 CONFIRM 后结束这次协调并把设备置为 IDLE，同时保留 15 秒的显式补偿窗口。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED、4 CONFIRMED。
 
-当前只实现状态机，尚无自动双 C5 控制器、联合候选试探和 EMA 采样。调用方提交的双方数据必须来自真实测量，不能把扫描 RSSI 或单边 RTT 充当双方证据。Windows 热点信道由 Windows 控制，C5 STA 不能命令它切频；后续需要可控制的 C5 AP/STA 拓扑验证。
+Gateway 已实现双 C5、双方均为 HE20 STA 时的协调：五轮本地扫描、共同候选信道评分、五次当前链路探测、双端预备与提交、双端确认/完成以及失败补偿。当前链路 RTT/丢包是 Gateway 到各 C5 的 TLS 探测数据，不能称为 C5 之间的测量；扫描 RSSI 只代表 C5 到接入点。C5 AP+STA 角色协商、AP 自身候选信道干扰测量和 EMA 平滑尚未实现。Windows 热点信道由 Windows 控制，STA 不会命令它切频。无双 C5 与 Wi-Fi 6 HE20 热点的真机测试环境，主机模拟结果不能替代无线验收。
 
 ## UDP 发现与安全边界
 

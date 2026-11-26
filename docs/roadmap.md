@@ -6,16 +6,16 @@
 |---|---|---|
 | A. 工作区基线 | 可运行本机 Gateway 模拟器和 Console；稳定公共接口 | 本地自动测试与 CI 通过；原型限制明确 |
 | B. 关键技术选型 | Rust/Go 等价 Gateway 实验；管理编码和 C5 链路小实验 | 官方资料与测量数据形成 ADR；没有数据的项目保持未验证 |
-| C. C5 Probe 最小固件 | Wi-Fi 接入、身份、能力和有界会话的 ESP-IDF C/C++ 工程 | 明确板卡、ESP-IDF 版本、构建结果和功耗/RAM 预算 |
-| D. 调试互操作 | 通过无线探针连接 OpenOCD 或其他经验证后端 | CMSIS-DAP 命令、超时、错误恢复及授权目标的硬件证据 |
+| C. C5 Probe 最小固件 | Wi-Fi 接入、身份、能力和有界会话的 ESP-IDF C/C++ 工程 | 已完成 C5 TLS RPC、租约、GPIO 总线、CMSIS-DAP、签名双槽 OTA、扫描与切频状态机；剩余真实 HE20 链路、目标 SWD、电气与掉电证据 |
+| D. 调试互操作 | 通过无线探针连接 OpenOCD 或其他经验证后端 | 主机解析器、TCP 分帧和错误恢复已测；真实探针列举、GDB server 和授权目标硬件证据待完成 |
 | E. 首个端到端硬件里程碑 | 电脑经 Wi-Fi/C5 探针对授权 STM32F405 烧录和调试 | 可恢复的目标板、真实烧录/调试记录和故障恢复检查 |
 | F. P4 / OTA / 外设扩展 | 在前序边界稳定后验证 USB、OTA 和逐项总线能力 | 每个功能有具体硬件、资源测量、安全验证及回退路径 |
 
 ## 当前未解决的阻塞
 
-- 本机没有 Go、ESP-IDF、OpenOCD 或 STM32 硬件工具链，因此语言比较和固件构建未完成。
+- 本机没有 Go、OpenOCD 或 STM32 硬件工具链；ESP-IDF v6.1.1 已安装并完成 C5 构建。
 - 没有确认具体 C5/P4 板卡和电气设计，不能给出引脚、SWD 时钟或 USB High-Speed 声明。
-- `gh auth status` 为 401；仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人均未验证。
+- `gh auth status` 为 401；仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人均未验证，因而不推送远端。
 - 设备配对、远端身份、TLS、升级密钥和 STM32 Bootloader 安全模型仍需决策。
 
-下一项最小工作：准备可复现的 Rust/Go 原型实验环境，定下 Gateway；并在确定硬件板卡后只安装 C5 目标所需 ESP-IDF，再构建 Probe C5 骨架。
+下一项最小工作：提供能协商 Wi-Fi 6 HE20 的接入点，完成 COM8 的发现、TLS、租约、DAP、OTA 恢复和双设备测试；随后再扩展控制台的多设备管理界面。
