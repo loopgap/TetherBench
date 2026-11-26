@@ -98,9 +98,8 @@ esp_err_t tb_wifi_init(void) {
     wifi_protocols_t protocols={.ghz_2g=WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX,
         .ghz_5g=WIFI_PROTOCOL_11A|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AX};
     err=esp_wifi_set_protocols(TB_WIFI_AP?WIFI_IF_AP:WIFI_IF_STA,&protocols); if (err!=ESP_OK) return err;
-    if (TB_WIFI_AP) {
-        err=esp_wifi_set_bandwidth(WIFI_IF_AP,WIFI_BW20); if (err!=ESP_OK) return err;
-    }
+    wifi_bandwidths_t bandwidths={.ghz_2g=WIFI_BW20,.ghz_5g=WIFI_BW20};
+    err=esp_wifi_set_bandwidths(TB_WIFI_AP?WIFI_IF_AP:WIFI_IF_STA,&bandwidths); if (err!=ESP_OK) return err;
     err=esp_wifi_set_ps(WIFI_PS_NONE); if (err!=ESP_OK) return err;
     if (TB_WIFI_AP) {
         esp_netif_ip_info_t info;
