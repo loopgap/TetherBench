@@ -9,7 +9,7 @@
 | Arm 解析器 | 固定真实源码编译运行通过；Transfer/TransferBlock 最大批量、TransferConfigure 默认重试值、SWD 序列超时检查及 2066 条 fuzz 输入的响应边界检查通过 |
 | Python 客户端 | 客户端 3 项通过：帧边界、凭据发送前匹配证书、丢失回复不重放；pyOCD 适配器 4 项通过：TCP 分帧、单并发、错误响应断连、注册和 ID 过滤（pyOCD API 使用替身） |
 | OpenOCD 互操作 | ESP-IDF 配套 v0.12.0-esp32-20260831 初始化真实 Arm 解析器，共 18 条命令，退出码 0；Windows 空 socket 轮询仍打印 64 次 WSA 10035。GPIO 为桩，不是 C5 SWD 验证 |
-| OTA 状态回归 | 真实 probe_ota.c 加 SDK/密码算法替身测试通过：先持久化再擦写、重启检查点、重复块、存储/写入失败、确认；不代表密码算法和真实掉电验证 |
+| OTA 状态回归 | 真实 probe_ota.c 加 SDK/密码算法替身测试通过：先持久化再擦写、重启检查点、重复块、存储/写入失败、确认；另验证拒绝指向运行槽的恢复目标和未对齐检查点。不代表密码算法和真实掉电验证 |
 | IDF 构建 | 本机 ESP-IDF v6.1.1 当前 wireless-console 工作树构建通过；最新镜像 0x11e4b0 字节，1.875 MiB OTA 槽剩余 0xc1b50 字节（约 40%）。COM8 已用此前的 0x11e450 镜像烧录并完成校验 |
 | 本轮复核 | ESP-IDF v6.1.1 构建退出码 0，最新镜像 0x11e4b0；`python firmware/probe-c5/tools/test_core.py` 通过，包含核心、OTA SDK/密码算法替身、Arm CMSIS-DAP 与 pyOCD TCP 测试（pyOCD unittest 4 项） |
 | 原 Flash | COM7，C5HF4 rev1.0，4 MiB；完整备份 4194304 字节，留在 .local |
