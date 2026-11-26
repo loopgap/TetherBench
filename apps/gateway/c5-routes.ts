@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
-import { ControlError } from './c5.ts';
+import { ControlError, decodeC5Ota } from './c5.ts';
 import type { C5OtaState, C5Registry } from './c5.ts';
 import type { C5AdapterType } from './c5.ts';
 import type { C5Adapters } from './c5-adapters.ts';
-import { OP, decodeOta } from '../../firmware/probe-c5/tools/client.ts';
+import { OP } from '../../firmware/probe-c5/tools/client.ts';
 
 type JsonReader = (request: IncomingMessage) => Promise<unknown>
 type JsonWriter = (response: ServerResponse, status: number, value: unknown) => void
@@ -47,7 +47,7 @@ export async function uploadC5(registry: C5Registry, id: string, sessionId: stri
           manifest = Buffer.from(pending.subarray(0, 176)); pending = pending.subarray(176);
           total = manifest.readUInt32LE(12);
           if (total < 288 || total > 0x1e0000 || declaredSize !== 176 + total) fail(400, 'ota_size', 'Manifest and upload lengths do not match.');
-          record.ota = decodeOta(await client.rpc(OP.OTA_BEGIN, manifest));
+          record.ota = decodeC5Ota(await client.rpc(OP.OTA_BEGIN, manifest), total);
           if (record.ota.total !== total || record.ota.received > total) throw new Error('Invalid OTA resume offset.');
           received = record.ota.received;
         }
@@ -59,7 +59,7 @@ export async function uploadC5(registry: C5Registry, id: string, sessionId: stri
           if (pending.length < 4084 && inputBytes < declaredSize) break;
           const count = Math.min(4084, pending.length);
           const block = Buffer.alloc(12 + count); manifest.copy(block, 0, 0, 8); block.writeUInt32LE(imageOffset, 8); pending.copy(block, 12, 0, count);
-          record.ota = decodeOta(await client.rpc(OP.OTA_WRITE, block));
+          record.ota = decodeC5Ota(await client.rpc(OP.OTA_WRITE, block), total);
           imageOffset += count; received = imageOffset; pending = pending.subarray(count);
           if (Date.now() - renewed >= 10000) { await client.renew(); renewed = Date.now(); }
         }
@@ -67,7 +67,7 @@ export async function uploadC5(registry: C5Registry, id: string, sessionId: stri
       if (!manifest || inputBytes !== declaredSize || imageOffset !== total) fail(400, 'ota_truncated', 'OTA upload was truncated.');
       const completedManifest = manifest;
       await client.rpc(OP.OTA_FINISH, completedManifest.subarray(0, 8));
-      record.ota = decodeOta(await client.rpc(OP.OTA_STATUS)); return record.ota;
+      record.ota = decodeC5Ota(await client.rpc(OP.OTA_STATUS), total); return record.ota;
     } finally { clearTimeout(timer); }
   });
 }

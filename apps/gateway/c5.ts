@@ -130,6 +130,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function decodeC5Ota(data: Buffer, expectedTotal?: number): C5OtaState {
+  const state = decodeOta(data);
+  const empty = state.phase === 0;
+  const invalid = state.phase > 5 || state.received > state.total || state.checkpoint > state.received
+    || data.readUInt32LE(24) > 1
+    || (expectedTotal !== undefined && state.total !== expectedTotal)
+    || (empty && (state.jobId !== '0' || state.received !== 0 || state.checkpoint !== 0 || state.total !== 0 || state.pendingBoot));
+  if (invalid) throw new Error('Invalid C5 OTA state.');
+  if (state.phase >= 2 && state.phase <= 4 && state.received !== state.total) {
+    throw new Error('Invalid C5 OTA completion state.');
+  }
+  return state;
+}
+
 export class ControlError extends Error {
   readonly status: number;
   readonly code: string;
@@ -616,7 +630,7 @@ export class C5Registry {
       }
       const data = await this.client(record).rpc(op, payload);
       record.lastSeenAt = new Date(this.now()).toISOString();
-      if (op === OP.OTA_STATUS) record.ota = decodeOta(data);
+      if (op === OP.OTA_STATUS) record.ota = decodeC5Ota(data);
       else if (op === OP.OTA_ABORT) record.ota = { jobId: '0', phase: 0, received: 0, checkpoint: 0, total: 0, pendingBoot: false };
       else if (op === OP.OTA_ACTIVATE && payload.length === 8 && record.ota?.jobId === payload.readBigUInt64LE().toString()) {
         record.ota = { ...record.ota, phase: 3, pendingBoot: false };
@@ -628,7 +642,7 @@ export class C5Registry {
     return this.run(id, async (record) => {
       const client = this.client(record);
       record.info = await client.info();
-      record.ota = decodeOta(await client.rpc(OP.OTA_STATUS, Buffer.alloc(0), 0n));
+      record.ota = decodeC5Ota(await client.rpc(OP.OTA_STATUS, Buffer.alloc(0), 0n));
       const data = await client.rpc(OP.CONFIG, Buffer.alloc(0), 0n);
       if (data.length !== 48) throw new Error('Invalid C5 pin configuration.');
       const pins: C5PinConfiguration[] = [];
@@ -655,7 +669,7 @@ export class C5Registry {
         }
         item.info = await client.info();
         if (!item.ota || item.info.pendingBoot || item.ota.phase === 3) {
-          item.ota = decodeOta(await client.rpc(OP.OTA_STATUS, Buffer.alloc(0), 0n));
+          item.ota = decodeC5Ota(await client.rpc(OP.OTA_STATUS, Buffer.alloc(0), 0n));
         }
         item.lastSeenAt = new Date(this.now()).toISOString();
       });

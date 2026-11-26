@@ -26,7 +26,7 @@ function fixtures() {
   const registry = new C5Registry(profiles, {
     now: () => clock, discovery: async () => [],
     clientFactory(options: C5ClientOptions) {
-      const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, closed: false,
+      const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, closed: false, malformedOta: false,
         close() { this.closed = true; }, async info() { if (this.closed) throw new Error('client is closed'); if (this.fail) throw new Error('connection lost'); return { id: 'c5-00000000000' + options.id.slice(-1), board: 'esp32c5-n4', pendingBoot: Boolean(this.pendingBoot) }; },
         async acquire() { this.lease = 42n; }, async renew() { this.renewed = true; }, async release() { this.lease = 0n; },
         async rpc(op: number, data: Buffer = Buffer.alloc(0)) {
@@ -40,7 +40,8 @@ function fixtures() {
           if (op === OP.OTA_ACTIVATE) { this.job = data.readBigUInt64LE(); this.phase = 3; return Buffer.alloc(0); }
           if (new Set<number>([OP.OTA_BEGIN, OP.OTA_WRITE, OP.OTA_STATUS]).has(op)) {
             const state = Buffer.alloc(28); state.writeBigUInt64LE(this.job); state.writeUInt32LE(this.phase, 8);
-            state.writeUInt32LE(this.received, 12); state.writeUInt32LE(this.total ?? 0, 20); state.writeUInt32LE(this.pendingBoot ? 1 : 0, 24); return state;
+            state.writeUInt32LE(this.malformedOta ? (this.total ?? 0) + 1 : this.received, 12);
+            state.writeUInt32LE(this.total ?? 0, 20); state.writeUInt32LE(this.pendingBoot ? 1 : 0, 24); return state;
           }
           return data;
         } }; clients.push(client); return client as unknown as InstanceType<typeof C5Client>;
@@ -230,6 +231,17 @@ test('OTA upload streams bounded blocks and resumes from the device offset', asy
     assert.equal(state.phase, 2); assert.equal(state.received, image.length);
     await assert.rejects(uploadC5(registry, 'probe-1', 'wrong-owner', Readable.from([]), wire.length), { code: 'session_expired' });
     await assert.rejects(uploadC5(registry, 'probe-1', session.id, Readable.from([wire.subarray(0, 100)]), wire.length), { code: 'ota_truncated' });
+  } finally { registry.close(); }
+});
+
+test('OTA upload rejects an inconsistent checkpoint from the C5', async () => {
+  const { registry, clients } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const manifest = Buffer.alloc(176), image = Buffer.alloc(288);
+    manifest.writeBigUInt64LE(43n); manifest.writeUInt32LE(image.length, 12); clients[0].malformedOta = true;
+    await assert.rejects(uploadC5(registry, 'probe-1', session.id, Readable.from([Buffer.concat([manifest, image])]), manifest.length + image.length), { code: 'probe_transport' });
+    assert.equal(registry.record('probe-1').connected, false);
   } finally { registry.close(); }
 });
 

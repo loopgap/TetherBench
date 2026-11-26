@@ -40,6 +40,8 @@ Automatic channel switching currently requires both devices to be idle Wi-Fi 6 H
 
 ## OTA and local adapters
 
+The current `wireless-console` branch exposes C5-native OTA opcodes 32..38 only. Target-MCU OTA opcodes 39..45 are intentionally not exposed here until the target-forwarding firmware component and TypeScript C5 client are present on the same branch; an HTTP route must not imply target bootloader support that has not been verified.
+
 | Method and path | Request | Behavior |
 |---|---|---|
 | `POST /api/v1/c5/{id}/ota` | `application/octet-stream`, `X-TetherBench-Session`, explicit `Content-Length`; 176-byte signed manifest followed by image | Streams bounded chunks to the inactive C5 slot and resumes from the device checkpoint. Request size is limited to the manifest plus one OTA slot. Response reports device validation state; it does not activate the image. |
@@ -48,5 +50,7 @@ Automatic channel switching currently requires both devices to be idle Wi-Fi 6 H
 | `POST /api/v1/c5/{id}/adapters/stop` | `{ sessionId }` | Stop the adapter and release its socket. |
 
 The OpenOCD adapter is a loopback CMSIS-DAP TCP relay. USB/IP protocol support does not establish Windows VHCI driver installation, device enumeration, or hardware functionality. The USB model uses laboratory VID/PID `1209:0001`; assign a project VID/PID before distributing it. See [debug backend status](../firmware/probe-c5/docs/debug-backends.md).
+
+Before accepting a resumed C5 OTA upload, the Gateway validates the returned phase, total, received offset, and durable checkpoint. A malformed state is treated as an untrusted device response and the connection is closed; the upload is not replayed automatically.
 
 Discovery, bearer credentials, Wi-Fi, SWD waveforms, target identity and OTA rollback depend on hardware and must be verified independently of host route tests.
