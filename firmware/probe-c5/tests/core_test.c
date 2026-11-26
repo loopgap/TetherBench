@@ -188,6 +188,51 @@ static void wireless_rssi(void)
     sample.bssid[0] = 10;
     assert(!tb_scan_merge(records, &count, 2, &sample) && count == 2);
 }
+static void target_frames(void)
+{
+    static const uint8_t crc_input[] = "123456789";
+    assert(tb_crc32(crc_input, sizeof crc_input - 1) == 0xcbf43926);
+    uint8_t data[TB_TARGET_PAYLOAD_MAX];
+    for (size_t i = 0; i < sizeof data; i++)
+        data[i] = (uint8_t)(i * 13u);
+    struct tb_target_frame frame = {.op = TB_TARGET_WRITE, .sequence = 0x12345678, .data = data, .size = sizeof data};
+    uint8_t uart[TB_TARGET_UART_MAX], uart_payload[TB_TARGET_PAYLOAD_MAX];
+    size_t uart_size = tb_target_uart_encode(&frame, uart, sizeof uart);
+    assert(uart_size <= sizeof uart && uart_size > 1 && uart[uart_size - 1] == 0);
+    for (size_t i = 0; i + 1 < uart_size; i++)
+        assert(uart[i]);
+    struct tb_target_frame decoded = {0};
+    assert(tb_target_uart_decode(uart, uart_size, &decoded, uart_payload) == TB_OK);
+    assert(decoded.op == frame.op && decoded.sequence == frame.sequence && decoded.size == sizeof data &&
+           !memcmp(decoded.data, data, sizeof data));
+    memset(data, 0, sizeof data);
+    uart_size = tb_target_uart_encode(&frame, uart, sizeof uart);
+    assert(uart_size <= sizeof uart && uart_size > sizeof data);
+    assert(tb_target_uart_decode(uart, uart_size, &decoded, uart_payload) == TB_OK);
+    assert(decoded.size == sizeof data && !memcmp(decoded.data, data, sizeof data));
+    uint8_t guarded[TB_TARGET_UART_MAX + 8];
+    for (size_t capacity = 0; capacity < uart_size; capacity++) {
+        memset(guarded, 0xa5, sizeof guarded);
+        assert(tb_target_uart_encode(&frame, guarded, capacity) == 0);
+        for (size_t i = capacity; i < capacity + 8; i++)
+            assert(guarded[i] == 0xa5);
+    }
+    uint8_t spi[TB_TARGET_SPI_SIZE], spi_payload[TB_TARGET_PAYLOAD_MAX];
+    assert(tb_target_spi_encode(&frame, spi) == 20 + sizeof data);
+    assert(tb_target_spi_decode(spi, sizeof spi, &decoded, spi_payload) == TB_OK);
+    assert(decoded.op == frame.op && decoded.sequence == frame.sequence && decoded.size == sizeof data &&
+           !memcmp(decoded.data, data, sizeof data));
+    spi[TB_TARGET_SPI_SIZE - 1] = 1;
+    assert(tb_target_spi_decode(spi, sizeof spi, &decoded, spi_payload) == TB_INVALID);
+    spi[TB_TARGET_SPI_SIZE - 1] = 0;
+    spi[20] ^= 1;
+    assert(tb_target_spi_decode(spi, sizeof spi, &decoded, spi_payload) == TB_INTEGRITY);
+    uart[uart_size - 2] ^= 1;
+    assert(tb_target_uart_decode(uart, uart_size, &decoded, uart_payload) != TB_OK);
+    assert(tb_target_uart_decode(uart, uart_size - 1, &decoded, uart_payload) == TB_INVALID);
+    frame.sequence = 0;
+    assert(tb_target_uart_encode(&frame, uart, sizeof uart) == 0);
+}
 int main(void)
 {
     frames();
@@ -196,5 +241,6 @@ int main(void)
     dap();
     bands();
     wireless_rssi();
-    puts("core: frame, lease, pin, DAP, band and RSSI checks passed");
+    target_frames();
+    puts("core: frame, lease, pin, DAP, band, RSSI and target OTA checks passed");
 }

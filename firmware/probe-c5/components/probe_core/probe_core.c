@@ -54,6 +54,146 @@ size_t tb_encode(uint8_t *p, const struct tb_frame *f, enum tb_status status, si
     tb_put64(p + 16, f->lease);
     return TB_HEADER_SIZE + size;
 }
+uint32_t tb_crc32(const uint8_t *data, size_t size)
+{
+    static const uint32_t nibble[16] = {0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac, 0x76dc4190, 0x6b6b51f4,
+                                        0x4db26158, 0x5005713c, 0xedb88320, 0xf00f9344, 0xd6d6a3e8, 0xcb61b38c,
+                                        0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c};
+    uint32_t crc = UINT32_MAX;
+    for (size_t i = 0; i < size; i++) {
+        crc ^= data[i];
+        crc = (crc >> 4) ^ nibble[crc & 0xf];
+        crc = (crc >> 4) ^ nibble[crc & 0xf];
+    }
+    return ~crc;
+}
+static size_t target_pack(const struct tb_target_frame *frame, uint8_t *packet, size_t capacity)
+{
+    if (!frame || !packet || frame->op > TB_TARGET_ABORT || frame->status > TB_TARGET_TIMEOUT || !frame->sequence ||
+        frame->size > TB_TARGET_PAYLOAD_MAX || (frame->size && !frame->data) || capacity < 20 + frame->size)
+        return 0;
+    memcpy(packet, "TBUP", 4);
+    packet[4] = 1;
+    packet[5] = frame->op;
+    packet[6] = frame->status;
+    packet[7] = 0;
+    tb_put32(packet + 8, frame->sequence);
+    tb_put16(packet + 12, (uint16_t)frame->size);
+    tb_put16(packet + 14, 0);
+    if (frame->size)
+        memcpy(packet + 16, frame->data, frame->size);
+    tb_put32(packet + 16 + frame->size, tb_crc32(packet, 16 + frame->size));
+    return 20 + frame->size;
+}
+static enum tb_status target_parse(const uint8_t *packet, size_t size, struct tb_target_frame *frame,
+                                   uint8_t payload[TB_TARGET_PAYLOAD_MAX])
+{
+    if (!packet || !frame || !payload || size < 20 || size > 20 + TB_TARGET_PAYLOAD_MAX || memcmp(packet, "TBUP", 4) ||
+        packet[4] != 1 || packet[5] > TB_TARGET_ABORT || packet[6] > TB_TARGET_TIMEOUT || packet[7] ||
+        tb_u16(packet + 14))
+        return TB_INVALID;
+    size_t payload_size = tb_u16(packet + 12);
+    if (payload_size > TB_TARGET_PAYLOAD_MAX || size != 20 + payload_size || !tb_u32(packet + 8))
+        return TB_INVALID;
+    if (tb_u32(packet + 16 + payload_size) != tb_crc32(packet, 16 + payload_size))
+        return TB_INTEGRITY;
+    if (payload_size)
+        memcpy(payload, packet + 16, payload_size);
+    *frame = (struct tb_target_frame){
+        .op = packet[5], .status = packet[6], .sequence = tb_u32(packet + 8), .data = payload, .size = payload_size};
+    return TB_OK;
+}
+static size_t cobs_encode(const uint8_t *input, size_t size, uint8_t *output, size_t capacity)
+{
+    if (!capacity)
+        return 0;
+    size_t code_index = 0, write = 1;
+    uint8_t code = 1;
+    for (size_t i = 0; i < size; i++) {
+        if (!input[i]) {
+            output[code_index] = code;
+            code_index = write++;
+            code = 1;
+        } else {
+            if (write >= capacity)
+                return 0;
+            output[write++] = input[i];
+            if (++code == 0xff) {
+                output[code_index] = code;
+                code_index = write++;
+                code = 1;
+            }
+        }
+        if (write > capacity)
+            return 0;
+    }
+    if (write >= capacity)
+        return 0;
+    output[code_index] = code;
+    output[write++] = 0;
+    return write;
+}
+static size_t cobs_decode(const uint8_t *input, size_t size, uint8_t *output, size_t capacity)
+{
+    size_t read = 0, write = 0;
+    while (read < size) {
+        uint8_t code = input[read++];
+        if (!code || (size_t)(code - 1) > size - read || (size_t)(code - 1) > capacity - write)
+            return 0;
+        for (unsigned i = 1; i < code; i++) {
+            uint8_t value = input[read++];
+            if (!value)
+                return 0;
+            output[write++] = value;
+        }
+        if (code != 0xff && read < size) {
+            if (write == capacity)
+                return 0;
+            output[write++] = 0;
+        }
+    }
+    return write;
+}
+size_t tb_target_uart_encode(const struct tb_target_frame *frame, uint8_t *wire, size_t capacity)
+{
+    uint8_t packet[20 + TB_TARGET_PAYLOAD_MAX];
+    size_t packet_size = target_pack(frame, packet, sizeof packet);
+    if (!packet_size || capacity > TB_TARGET_UART_MAX)
+        capacity = TB_TARGET_UART_MAX;
+    if (!packet_size || !wire)
+        return 0;
+    return cobs_encode(packet, packet_size, wire, capacity);
+}
+enum tb_status tb_target_uart_decode(const uint8_t *wire, size_t size, struct tb_target_frame *frame,
+                                     uint8_t payload[TB_TARGET_PAYLOAD_MAX])
+{
+    if (!wire || !size || size > TB_TARGET_UART_MAX || wire[size - 1])
+        return TB_INVALID;
+    uint8_t packet[20 + TB_TARGET_PAYLOAD_MAX];
+    size_t packet_size = cobs_decode(wire, size - 1, packet, sizeof packet);
+    return packet_size ? target_parse(packet, packet_size, frame, payload) : TB_INVALID;
+}
+size_t tb_target_spi_encode(const struct tb_target_frame *frame, uint8_t wire[TB_TARGET_SPI_SIZE])
+{
+    if (!wire)
+        return 0;
+    memset(wire, 0, TB_TARGET_SPI_SIZE);
+    return target_pack(frame, wire, TB_TARGET_SPI_SIZE);
+}
+enum tb_status tb_target_spi_decode(const uint8_t *wire, size_t size, struct tb_target_frame *frame,
+                                    uint8_t payload[TB_TARGET_PAYLOAD_MAX])
+{
+    if (!wire || size != TB_TARGET_SPI_SIZE || !frame)
+        return TB_INVALID;
+    size_t payload_size = tb_u16(wire + 12);
+    size_t packet_size = 20 + payload_size;
+    if (payload_size > TB_TARGET_PAYLOAD_MAX || packet_size > size)
+        return TB_INVALID;
+    for (size_t i = packet_size; i < size; i++)
+        if (wire[i])
+            return TB_INVALID;
+    return target_parse(wire, packet_size, frame, payload);
+}
 bool tb_owned(const struct tb_lease *l, uint64_t now, uint64_t id)
 {
     return id && id == l->id && now < l->deadline;

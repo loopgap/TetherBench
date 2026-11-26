@@ -14,6 +14,9 @@ extern "C" {
 #define TB_MANIFEST_SIGNED_SIZE 176u
 #define TB_BAND_CONFIRM_MIN_RSSI (-80)
 #define TB_BOARD_ID "esp32c5-n4"
+#define TB_TARGET_PAYLOAD_MAX 997u
+#define TB_TARGET_UART_MAX 1024u
+#define TB_TARGET_SPI_SIZE 1024u
 
 enum tb_status
 {
@@ -62,11 +65,41 @@ enum tb_protocol
     TB_I2C,
     TB_PROTOCOL_COUNT
 };
+enum tb_target_op
+{
+    TB_TARGET_POLL,
+    TB_TARGET_HELLO,
+    TB_TARGET_BEGIN,
+    TB_TARGET_WRITE,
+    TB_TARGET_FINISH,
+    TB_TARGET_ACTIVATE,
+    TB_TARGET_STATUS,
+    TB_TARGET_ABORT
+};
+enum tb_target_status
+{
+    TB_TARGET_OK,
+    TB_TARGET_INVALID,
+    TB_TARGET_BUSY,
+    TB_TARGET_UNSUPPORTED,
+    TB_TARGET_IO,
+    TB_TARGET_INTEGRITY,
+    TB_TARGET_STATE,
+    TB_TARGET_CONFLICT,
+    TB_TARGET_TIMEOUT
+};
 struct tb_frame
 {
     uint8_t op;
     uint32_t request;
     uint64_t lease;
+    const uint8_t *data;
+    size_t size;
+};
+struct tb_target_frame
+{
+    uint8_t op, status;
+    uint32_t sequence;
     const uint8_t *data;
     size_t size;
 };
@@ -116,6 +149,13 @@ void tb_put32(uint8_t *p, uint32_t n);
 void tb_put64(uint8_t *p, uint64_t n);
 enum tb_status tb_decode(const uint8_t *p, size_t n, struct tb_frame *f);
 size_t tb_encode(uint8_t *p, const struct tb_frame *f, enum tb_status status, size_t size);
+uint32_t tb_crc32(const uint8_t *data, size_t size);
+size_t tb_target_uart_encode(const struct tb_target_frame *frame, uint8_t *wire, size_t capacity);
+enum tb_status tb_target_uart_decode(const uint8_t *wire, size_t size, struct tb_target_frame *frame,
+                                     uint8_t payload[TB_TARGET_PAYLOAD_MAX]);
+size_t tb_target_spi_encode(const struct tb_target_frame *frame, uint8_t wire[TB_TARGET_SPI_SIZE]);
+enum tb_status tb_target_spi_decode(const uint8_t *wire, size_t size, struct tb_target_frame *frame,
+                                    uint8_t payload[TB_TARGET_PAYLOAD_MAX]);
 enum tb_status tb_acquire(struct tb_lease *l, uint64_t now, uint64_t id, uint32_t ttl);
 bool tb_owned(const struct tb_lease *l, uint64_t now, uint64_t id);
 enum tb_status tb_renew(struct tb_lease *l, uint64_t now, uint64_t id, uint32_t ttl);
