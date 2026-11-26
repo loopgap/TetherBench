@@ -20,10 +20,11 @@
 | 热点和 HE20 | 未通过：2026-11-26 Windows 热点 2.4 GHz 测试为 phymode=3、he:0、ht:1；临时切换 5 GHz 后为 phymode=3、he:0、vht:1，信道 40、20 MHz、RSSI -50 dBm。两种配置均被固件按 Wi-Fi 6 要求拒绝并退避；热点频段已恢复 2.4 GHz 且保持开启。已确认本机 RZ608 支持 5/6 GHz 11ax，仍需能提供 HE20 的独立接入点 |
 | AP 端 RSSI | IDF 编译通过，核心聚合规则测试通过；AP 关联真机读数尚未验证 |
 | AP 带宽初始化回归 | 2026-11-27 使用 ESP-IDF 6.1.1 将 AUTO 双频下不支持的单频带宽 API 改为双频 `esp_wifi_set_bandwidths()`；COM7 AP 镜像写入哈希校验通过，串口确认 softAP、DHCP `192.168.4.1`、TLS RPC 443 和 UDP 4440 正常启动，15 秒内无 abort、重启或带宽错误。STA 镜像已恢复并在 COM7 启动；AP 客户端接入和 AP/STA 协同仍未验证 |
-| 发现/TLS/租约/DAP Info | 因热点不满足 HE20，发现返回空，无线真机验证尚未通过 |
+| C5 SoftAP 到 C5 STA | 2026-11-27 COM7 运行 AP 镜像、COM8 运行 STA 镜像；COM8 串口确认 `11ax`、`he:1`、`channel 6`、`BW20`、`PHY=HE20`，并取得 `192.168.4.2`。COM7 提供 `192.168.4.1`。证明两种单一角色镜像可在本机组成 HE20 链路；未验证 Gateway 双设备协商、TLS/DAP/OTA 或目标 SWD |
+| 发现/TLS/租约/DAP Info | Windows 热点未提供 HE20；C5 SoftAP 与 STA 的关联已验证，但其上的发现、TLS、租约和 DAP 尚未验证 |
 | OTA 故障 | 签名、摘要、断电、确认和回滚仍待真机检查 |
 | SWD/总线 | 无目标接线与测量，实际速度和电气行为未验证 |
-| 双 C5 切频 | Gateway 双 STA 协调与模拟回归已实现；缺第二块已配置板卡和 HE20 网络；AP+STA 自动协调、COM7 无线验收未完成。代码检查发现 TB_WIFI_AP 路径虽建立 APSTA 模式与 AP netif，但只设置 AP 配置，没有设置 STA 凭据；该路径没有已实现的上行 STA 链路。Gateway 当前也只接受两个 STA 设备参与协商；AP 模式端到端切频未实现或验证 |
+| 双 C5 切频 | Gateway 双 STA 协调与模拟回归已实现；COM7/COM8 已证明纯 SoftAP 到 STA 的 HE20 关联，但没有验证 Gateway 双设备协商、确认或回滚。C5 的 `--ap` 是独立 SoftAP 模式，不提供同机 APSTA 上行；Gateway 当前只接受两个 STA 设备参与协商 |
 | pyOCD | pyOCD 0.46.1 已安装到忽略的 C5 调试环境；真实包插件列举和 CMSIS-DAP open 对本地有界 responder 通过，另有 4 项 TCP 传输回归；真实 C5 探针、GDB server 和目标 MCU 仍未验证 |
 | IDF 模拟器 | 本机 SDK QEMU 目标没有 C5，没有替代硬件结果 |
 | 虚拟 USB | USB/IP 描述符、导入和传输模型有主机测试；Windows VHCI 驱动安装和实际枚举未验证 |
