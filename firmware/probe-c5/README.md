@@ -1,6 +1,6 @@
 # Probe C5
 
-共享 ESP32-C5 N4 固件使用 ESP-IDF 6.1.1 独立构建，版本读取根目录 `VERSION`。已实现 TLS 二进制 RPC、UDP 发现、独占租约、可配置 SWD/UART/SPI/I2C、官方 Arm CMSIS-DAP 核心及签名双槽 OTA。Gateway 已实现双 STA 共同信道测量与协调；C5 AP+STA 协商、外部 MCU 更新适配和真实 USB 枚举尚未完成。
+共享 ESP32-C5 N4 固件使用 ESP-IDF 6.1.1 组件构建，版本读取根目录 `VERSION`。已实现 TLS 二进制 RPC、UDP 发现、独占租约、可配置 SWD/UART/SPI/I2C、官方 Arm CMSIS-DAP 核心、签名双槽 OTA，以及外部 MCU 的 UART/SPI OTA 转发与恢复锁。Gateway 已实现双 STA 共同信道测量与协调；C5 AP+STA 协商、目标 MCU bootloader 闭环和真实 USB 枚举尚未完成。
 
 跨工程入口：[C5 契约](../../contracts/probe-c5.md)。详细字段和恢复行为：[协议](docs/protocol.md)。编程及格式规范：[C5 编程规范](docs/coding-standards.md)。验证结果：[验收记录](docs/validation.md)。第三方版本及补丁：[CMSIS-DAP 来源](third_party/CMSIS-DAP/UPSTREAM.md)。
 
