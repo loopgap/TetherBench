@@ -5,6 +5,7 @@
 #include "tests_dap_io.h"
 #else
 #include "probe_io.h"
+#include "probe_dap.h"
 #endif
 
 #define CPU_CLOCK 240000000u
@@ -26,17 +27,17 @@
 #define TARGET_DEVICE_FIXED 0
 #define TARGET_BOARD_FIXED 0
 #define PIN_SWCLK_TCK_IN() tb_gpio_read(0)
-#define PIN_SWCLK_TCK_SET() tb_gpio_write(0,1)
-#define PIN_SWCLK_TCK_CLR() tb_gpio_write(0,0)
+#define PIN_SWCLK_TCK_SET() tb_gpio_write(0, 1)
+#define PIN_SWCLK_TCK_CLR() tb_gpio_write(0, 0)
 #define PIN_SWDIO_TMS_IN() tb_gpio_read(1)
-#define PIN_SWDIO_TMS_SET() tb_gpio_write(1,1)
-#define PIN_SWDIO_TMS_CLR() tb_gpio_write(1,0)
+#define PIN_SWDIO_TMS_SET() tb_gpio_write(1, 1)
+#define PIN_SWDIO_TMS_CLR() tb_gpio_write(1, 0)
 #define PIN_SWDIO_IN() tb_gpio_read(1)
-#define PIN_SWDIO_OUT(n) tb_gpio_write(1,n)
+#define PIN_SWDIO_OUT(n) tb_gpio_write(1, n)
 #define PIN_SWDIO_OUT_ENABLE() tb_swd_direction(true)
 #define PIN_SWDIO_OUT_DISABLE() tb_swd_direction(false)
 #define PIN_nRESET_IN() tb_gpio_read(2)
-#define PIN_nRESET_OUT(n) tb_gpio_write(2,n)
+#define PIN_nRESET_OUT(n) tb_gpio_write(2, n)
 #define PIN_TDI_IN() 0u
 #define PIN_TDO_IN() 0u
 #define PIN_nTRST_IN() 1u
@@ -51,11 +52,43 @@
 #define DAP_SETUP() ((void)0)
 #define RESET_TARGET() 0u
 
-__STATIC_INLINE uint8_t DAP_GetVendorString(char *s) { strcpy(s,"TetherBench"); return 12; }
-__STATIC_INLINE uint8_t DAP_GetProductString(char *s) { strcpy(s,"C5 wireless CMSIS-DAP"); return 22; }
-__STATIC_INLINE uint8_t DAP_GetSerNumString(char *s) { (void)s; return 0; }
-__STATIC_INLINE uint8_t DAP_GetTargetDeviceVendorString(char *s) { (void)s; return 0; }
-__STATIC_INLINE uint8_t DAP_GetTargetDeviceNameString(char *s) { (void)s; return 0; }
-__STATIC_INLINE uint8_t DAP_GetTargetBoardVendorString(char *s) { (void)s; return 0; }
-__STATIC_INLINE uint8_t DAP_GetTargetBoardNameString(char *s) { (void)s; return 0; }
-__STATIC_INLINE uint8_t DAP_GetProductFirmwareVersionString(char *s) { (void)s; return 0; }
+__STATIC_INLINE uint8_t DAP_GetVendorString(char *s)
+{
+    strcpy(s, "TetherBench");
+    return 12;
+}
+__STATIC_INLINE uint8_t DAP_GetProductString(char *s)
+{
+    strcpy(s, "C5 wireless CMSIS-DAP");
+    return 22;
+}
+__STATIC_INLINE uint8_t DAP_GetSerNumString(char *s)
+{
+    (void)s;
+    return 0;
+}
+__STATIC_INLINE uint8_t DAP_GetTargetDeviceVendorString(char *s)
+{
+    (void)s;
+    return 0;
+}
+__STATIC_INLINE uint8_t DAP_GetTargetDeviceNameString(char *s)
+{
+    (void)s;
+    return 0;
+}
+__STATIC_INLINE uint8_t DAP_GetTargetBoardVendorString(char *s)
+{
+    (void)s;
+    return 0;
+}
+__STATIC_INLINE uint8_t DAP_GetTargetBoardNameString(char *s)
+{
+    (void)s;
+    return 0;
+}
+__STATIC_INLINE uint8_t DAP_GetProductFirmwareVersionString(char *s)
+{
+    (void)s;
+    return 0;
+}

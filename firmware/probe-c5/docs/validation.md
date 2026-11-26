@@ -9,22 +9,27 @@
 | Arm 解析器 | 固定真实源码编译运行通过；Transfer/TransferBlock 最大批量、TransferConfigure 默认重试值、SWD 序列超时检查及 2066 条 fuzz 输入的响应边界检查通过 |
 | Python 客户端 | 客户端 3 项通过：帧边界、凭据发送前匹配证书、丢失回复不重放；pyOCD 适配器 4 项通过：TCP 分帧、单并发、错误响应断连、注册和 ID 过滤（pyOCD API 使用替身） |
 | OpenOCD 互操作 | ESP-IDF 配套 v0.12.0-esp32-20260831 初始化真实 Arm 解析器，共 18 条命令，退出码 0；Windows 空 socket 轮询仍打印 64 次 WSA 10035。GPIO 为桩，不是 C5 SWD 验证 |
-| OTA 状态回归 | 真实 probe_ota.c 加 SDK/密码算法替身测试通过：先持久化再擦写、重启检查点、重复块、存储/写入失败、确认；另验证拒绝指向运行槽的恢复目标和未对齐检查点。不代表密码算法和真实掉电验证 |
-| IDF 构建 | 本机 ESP-IDF v6.1.1 当前 wireless-console 工作树构建通过；最新镜像 0x11e4b0 字节，1.875 MiB OTA 槽剩余 0xc1b50 字节（约 40%）。COM8 已用此前的 0x11e450 镜像烧录并完成校验 |
+| OTA 状态回归 | 真实 probe_ota.c 加 SDK/密码算法替身测试通过：先持久化再擦写、重启检查点、重复块、存储/写入失败、确认；不代表密码算法和真实掉电验证 |
+| IDF 构建 | 本机 ESP-IDF v6.1.1 工作树构建通过；最新镜像 0x11e4b0 字节，1.875 MiB OTA 槽剩余 0xc1b50 字节（约 40%）。COM8 已用此前的 0x11e450 镜像烧录并完成校验 |
 | 本轮复核 | ESP-IDF v6.1.1 构建退出码 0，最新镜像 0x11e4b0；`python firmware/probe-c5/tools/test_core.py` 通过，包含核心、OTA SDK/密码算法替身、Arm CMSIS-DAP 与 pyOCD TCP 测试（pyOCD unittest 4 项） |
+| 2026-11-27 main OTA journal 修复复验 | `14b9d55` 后 `tools/test_core.py` 通过（核心、OTA SDK/密码替身、Arm CMSIS-DAP 与 pyOCD TCP 的 4 项 unittest）；ESP-IDF v6.1.1 构建通过，镜像 0x11e900，OTA 槽剩余 0xc1700（约 40%）。本次只构建，未烧录；不构成掉电或真机 OTA 证据 |
+| 2026-11-27 C5 组件分层和格式规范 | 按 ESP-IDF 组件拆分的源码、公开头文件和依赖通过 ESP-IDF v6.1.1 构建；主机 `tools/test_core.py` 通过，包含核心、OTA SDK/密码替身、Arm DAP 边界与 2066 条 fuzz 检查，以及 4 项 pyOCD 传输单测；Python 工具单测 6/6 通过；clang-format 22.1.7 对 C5 自有 30 个 C/C++ 文件执行格式检查通过。镜像 0x11e910 字节，OTA 槽剩余 0xc16f0 字节（约 40%）。这些检查不代表外设电气或掉电行为 |
 | 原 Flash | COM7，C5HF4 rev1.0，4 MiB；完整备份 4194304 字节，留在 .local |
 | COM8 烧录前备份 | 2026-11-26 只读识别 COM8 为 ESP32-C5HF4 rev1.2、4 MiB XMC Flash；烧录前将当前 4194304 字节 Flash 单独备份到忽略目录，未复用 COM7 备份 |
 | COM8 烧录与启动 | ESP-IDF v6.1.1 将 0x11e450 字节固件写入 COM8；快速差异写入校验未通过后，esptool 自动全量重写且最终哈希校验通过。IDF monitor 确认应用启动、分区加载及 TLS RPC 443 监听，无 panic 或启动回滚 |
 | COM8 无线连接 | Windows 热点可关联并取得 192.168.137.20，信道 11、20 MHz、RSSI -28 dBm，但协商为 11bgn/he:0；固件按 Wi-Fi 6 要求以 reason=8 断开并退避。因此发现、TLS 客户端认证、DAP、OTA 和双设备协商仍未完成真机端到端验收 |
 | COM7 最新烧录与启动 | 2026-11-26 将最新 0x11e4b0 镜像写入 COM7（ESP32-C5HF4 rev1.0、4 MiB），esptool 哈希校验通过；15 秒串口记录确认 ESP-IDF 6.1.1、分区加载、TLS RPC 443 和 UDP 4440 服务启动，无 panic。目标引脚仍未分配 |
+| 2026-11-27 组件版烧录与启动 | ROM 识别 COM7 为 ESP32-C5HF4 rev1.0、4 MiB XMC；对应 4 MiB 原始 Flash 备份在 `.local/original-flash.bin`。组件版 0x11e910 镜像烧录且哈希校验通过；复位日志确认应用、TLS RPC 443 和 UDP 4440 服务启动，15 秒内无新 panic 或重启。Wi-Fi 随后以 reason=201 断开，未完成 HE20 或端到端无线控制验证 |
+| 2026-11-27 目标 MCU 查询期限与编程规范复验 | C5 主机回归通过，新增 UART/SPI 全事务 100 ms 截止时间、发送阶段耗尽期限、非成功响应携带负载、分片 UART、SPI BUSY 轮询等检查；ESP-IDF v6.1.1 构建通过，镜像 0x11f8e0 字节、OTA 应用槽余量约 40%；IDF Python 环境单测 6/6、clang-format 检查通过、`npm run check` 8/8。未刷写本次镜像；未连接目标 MCU，因此不构成目标 OTA 或目标总线实机验证 |
+| 2026-11-27 动态状态缓存与规范回归 | `TB_TARGET_OTA_STATUS` 从成功响应缓存中排除，新增源码策略回归通过；ESP-IDF v6.1.1 Python 环境 `unittest discover` 11/11、pyOCD 传输 4/4、核心回归和 clang-format 检查通过，`npm run check` 8/8。系统 Python 3.14 未安装 `cryptography`，未将该环境结果作为固件工具验收依据 |
+| COM7 已存 core dump | 组件版启动时发现 Flash 中有 5376 字节旧 core dump；读取到 `.local/com7-coredump-20261127.bin`。其记录的应用 SHA-256 前缀为 `50f8ff3e0`，与当前 ELF 的 `dbb060624` 不同，不能用当前符号文件可靠解析；当前启动日志没有新 panic。原始转储保留在忽略目录，未擦除 |
 | 热点和 HE20 | 未通过：2026-11-26 Windows 热点 2.4 GHz 测试为 phymode=3、he:0、ht:1；临时切换 5 GHz 后为 phymode=3、he:0、vht:1，信道 40、20 MHz、RSSI -50 dBm。两种配置均被固件按 Wi-Fi 6 要求拒绝并退避；热点频段已恢复 2.4 GHz 且保持开启。已确认本机 RZ608 支持 5/6 GHz 11ax，仍需能提供 HE20 的独立接入点 |
 | AP 端 RSSI | IDF 编译通过，核心聚合规则测试通过；AP 关联真机读数尚未验证 |
 | AP 带宽初始化回归 | 2026-11-27 使用 ESP-IDF 6.1.1 将 AUTO 双频下不支持的单频带宽 API 改为双频 `esp_wifi_set_bandwidths()`；COM7 AP 镜像写入哈希校验通过，串口确认 softAP、DHCP `192.168.4.1`、TLS RPC 443 和 UDP 4440 正常启动，15 秒内无 abort、重启或带宽错误。STA 镜像已恢复并在 COM7 启动；AP 客户端接入和 AP/STA 协同仍未验证 |
-| C5 SoftAP 到 C5 STA | 2026-11-27 COM7 运行 AP 镜像、COM8 运行 STA 镜像；COM8 串口确认 `11ax`、`he:1`、`channel 6`、`BW20`、`PHY=HE20`，并取得 `192.168.4.2`。COM7 提供 `192.168.4.1`。证明两种单一角色镜像可在本机组成 HE20 链路；未验证 Gateway 双设备协商、TLS/DAP/OTA 或目标 SWD |
-| 发现/TLS/租约/DAP Info | Windows 热点未提供 HE20；C5 SoftAP 与 STA 的关联已验证，但其上的发现、TLS、租约和 DAP 尚未验证 |
+| 发现/TLS/租约/DAP Info | 因热点不满足 HE20，发现返回空，无线真机验证尚未通过 |
 | OTA 故障 | 签名、摘要、断电、确认和回滚仍待真机检查 |
 | SWD/总线 | 无目标接线与测量，实际速度和电气行为未验证 |
-| 双 C5 切频 | Gateway 双 STA 协调与模拟回归已实现；COM7/COM8 已证明纯 SoftAP 到 STA 的 HE20 关联，但没有验证 Gateway 双设备协商、确认或回滚。C5 的 `--ap` 是独立 SoftAP 模式，不提供同机 APSTA 上行；Gateway 当前只接受两个 STA 设备参与协商 |
+| 双 C5 切频 | Gateway 双 STA 协调与模拟回归已实现；缺第二块已配置板卡和 HE20 网络；AP+STA 自动协调、COM7 无线验收未完成。代码检查发现 TB_WIFI_AP 路径虽建立 APSTA 模式与 AP netif，但只设置 AP 配置，没有设置 STA 凭据；该路径没有已实现的上行 STA 链路。Gateway 当前也只接受两个 STA 设备参与协商；AP 模式端到端切频未实现或验证 |
 | pyOCD | pyOCD 0.46.1 已安装到忽略的 C5 调试环境；真实包插件列举和 CMSIS-DAP open 对本地有界 responder 通过，另有 4 项 TCP 传输回归；真实 C5 探针、GDB server 和目标 MCU 仍未验证 |
 | IDF 模拟器 | 本机 SDK QEMU 目标没有 C5，没有替代硬件结果 |
 | 虚拟 USB | USB/IP 描述符、导入和传输模型有主机测试；Windows VHCI 驱动安装和实际枚举未验证 |

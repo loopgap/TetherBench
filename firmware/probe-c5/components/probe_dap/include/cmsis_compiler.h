@@ -4,4 +4,4 @@
 #define __STATIC_FORCEINLINE static inline __attribute__((always_inline))
 #define __WEAK __attribute__((weak))
 #define __ASM __asm__
-#define __NOP() __asm__ volatile ("nop")
+#define __NOP() __asm__ volatile("nop")

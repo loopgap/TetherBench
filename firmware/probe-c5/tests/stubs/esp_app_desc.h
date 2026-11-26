@@ -1,2 +1,5 @@
 #pragma once
-typedef struct { char version[32],project_name[32]; } esp_app_desc_t;
+typedef struct
+{
+    char version[32], project_name[32];
+} esp_app_desc_t;

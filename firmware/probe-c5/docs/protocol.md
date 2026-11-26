@@ -1,6 +1,6 @@
 # Probe C5 协议版本 1
 
-日期：2026-11-26。已有源码实现；真实验证范围见 [验收记录](validation.md)。所有多字节整数均为小端，字节偏移从 0 开始。协议字段有定义不等于所有硬件适配已经验证。
+日期：2026-11-27。已有源码实现；真实验证范围见 [验收记录](validation.md)。所有多字节整数均为小端，字节偏移从 0 开始。协议字段有定义不等于所有硬件适配已经验证。
 
 ## 传输和设备身份
 
@@ -122,7 +122,27 @@ ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日�
 | ota_journal | 0x3e0000 | 0x10000 |
 | coredump | 0x3f0000 | 0x10000 |
 
-外部 MCU 后续复用 manifest/job_id/状态/分块语义，但目标标识、镜像格式、存储、掉电保证、bootloader 认证和确认必须由真实适配器定义。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
+外部 MCU 的签名双槽更新契约定义在 [Target MCU OTA v1 契约](../../../contracts/target-mcu-ota.md)。C5 端的 RPC 39..45 转发、目标身份校验和 NVS 恢复锁已实现；目标 MCU bootloader、受保护密钥、双槽回滚及 UART/SPI 实机闭环仍未实现或验证。因此，C5 主机模型与固件构建不能证明任意连接 MCU 支持安全 OTA。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
+
+## 外部 MCU OTA 扩展（C5 转发已实现，目标侧未闭环）
+
+外部 MCU 不能使用 C5 的 176 字节自更新 manifest：目标 MCU 使用带签名回滚索引的 184 字节 manifest，并要求目标 bootloader 独立校验签名、镜像摘要、双槽、持久检查点、试启动确认和回滚。目标与 C5 的详细物理帧、UART COBS、SPI 轮询、能力字段和恢复规则见 [Target MCU OTA v1 契约](../../../contracts/target-mcu-ota.md)。
+
+C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`、`TARGET_OTA_FINISH`、`TARGET_OTA_ACTIVATE`、`TARGET_OTA_STATUS` 和 `TARGET_OTA_ABORT`。C5 实现目标帧编解码、HELLO/状态解析、签名 manifest 预检、UART/SPI 转发及 NVS 持久资源锁；这些 RPC 是 C5 到目标 bootloader 的命令接口，不代表目标端实现已存在，也不能替代目标独立验签、双槽、持久检查点、试启动确认和回滚。主机替身测试只覆盖 C5 逻辑。
+
+| opcode | 请求 | 成功响应 |
+|---:|---|---|
+| 39 TARGET_INFO | UART=2 或 SPI=3 u8 | 180 字节 HELLO 能力、身份和 OTA 状态 |
+| 40 TARGET_OTA_BEGIN | 184 字节 target manifest | 64 字节状态 |
+| 41 TARGET_OTA_WRITE | `job_id` u64、`offset` u32、1..983 字节 | 64 字节状态 |
+| 42 TARGET_OTA_FINISH | `job_id` u64 | 64 字节状态 |
+| 43 TARGET_OTA_ACTIVATE | `job_id` u64 | 64 字节状态 |
+| 44 TARGET_OTA_STATUS | 空 | 64 字节状态 |
+| 45 TARGET_OTA_ABORT | `job_id` u64 | 64 字节状态 |
+
+TARGET_INFO 是只读预检，要求唯一 UART/SPI 总线已配置，并返回经验证的 HELLO 记录；它不设置更新锁，也不代表目标符合 OTA 能力要求。开始目标写入前，C5 必须核对 board ID、镜像容量、全部必需安全能力及非零目标 UID，再持久化同一总线的恢复锁，然后才向目标发送 BEGIN。若 C5 重启时已持久化锁而目标仍报告 EMPTY，C5 仅可用完全相同的 journal manifest 和 UID 重发 BEGIN，并重新检查当前回滚索引。锁定期间每次状态查询或可能改变目标状态的 RPC 前，C5 均通过 HELLO 验证 journal 中记录的 UID；不匹配、异常响应或总线错误都会保留锁并拒绝操作。
+
+目标帧响应的状态码非 OK 时 payload 必须为空；携带 payload 的错误响应按格式错误处理。更新锁期间 PINS 仍允许同一 UART/SPI 协议重新配置，以便维修接线；切换到另一协议、DAP、原始 BUS、切频以及 C5 OTA 的所有写入类操作均返回 BUSY。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。目标 UID 校验会在每次更新 RPC 前多产生一次 HELLO 总线事务，吞吐开销需要后续在每种总线上测量；目前没有目标板实测数据。
 
 ## Wi-Fi 和协商切频
 

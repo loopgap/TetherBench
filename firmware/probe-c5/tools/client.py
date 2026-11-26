@@ -16,8 +16,17 @@ MAX_PAYLOAD = 4096
 INFO, ACQUIRE, RENEW, RELEASE, PINS, CONFIG = range(1, 7)
 DAP, BUS = 16, 17
 OTA_BEGIN, OTA_WRITE, OTA_FINISH, OTA_ACTIVATE, OTA_STATUS, OTA_ABORT, BOOT_CONFIRM = range(32, 39)
+TARGET_INFO = 39
+TARGET_OTA_BEGIN, TARGET_OTA_WRITE, TARGET_OTA_FINISH, TARGET_OTA_ACTIVATE, TARGET_OTA_STATUS, TARGET_OTA_ABORT = (
+    range(40, 46)
+)
 WIFI_SCAN, BAND_PREPARE, BAND_COMMIT, BAND_CONFIRM, BAND_CANCEL = range(48, 53)
 REBOOT = 63
+UART, SPI = 2, 3
+TARGET_MANIFEST_SIZE = 184
+TARGET_HELLO_SIZE = 180
+TARGET_STATUS_SIZE = 64
+TARGET_WRITE_MAX = 983
 STATUS = ("OK", "INVALID", "UNAUTHORIZED", "BUSY", "LEASE", "UNSUPPORTED",
           "IO", "INTEGRITY", "STATE", "CONFLICT", "TIMEOUT")
 
@@ -121,6 +130,81 @@ class Client:
             self.rpc(RELEASE)
             self.lease = 0
 
+    @staticmethod
+    def _target_protocol(protocol):
+        if type(protocol) is not int or protocol not in (UART, SPI):
+            raise ValueError("Target protocol must be UART (2) or SPI (3)")
+        return protocol
+
+    @staticmethod
+    def _target_job_id(job_id):
+        if type(job_id) is not int or not 1 <= job_id <= 0xFFFFFFFFFFFFFFFF:
+            raise ValueError("Target job ID must be a nonzero u64")
+        return struct.pack("<Q", job_id)
+
+    @staticmethod
+    def _target_manifest(manifest):
+        if not isinstance(manifest, (bytes, bytearray, memoryview)):
+            raise ValueError("Target manifest must be bytes")
+        manifest = bytes(manifest)
+        if len(manifest) != TARGET_MANIFEST_SIZE:
+            raise ValueError("Target manifest must be exactly 184 bytes")
+        invalid_header = (
+            not struct.unpack_from("<Q", manifest)[0]
+            or manifest[8] != 1
+            or manifest[9]
+            or struct.unpack_from("<H", manifest, 10)[0]
+            or not struct.unpack_from("<I", manifest, 12)[0]
+            or not struct.unpack_from("<Q", manifest, 112)[0]
+        )
+        if invalid_header:
+            raise ValueError("Invalid target manifest header")
+        for offset in (48, 80):
+            field = manifest[offset:offset + 32]
+            terminator = field.find(b"\0")
+            if terminator <= 0 or any(field[terminator + 1:]):
+                raise ValueError("Target manifest strings must be NUL-terminated and zero-padded")
+        return manifest
+
+    def _target_rpc(self, op, payload, expected_size):
+        response = self.rpc(op, payload)
+        if len(response) != expected_size:
+            raise ValueError("Invalid target update response length")
+        return response
+
+    def target_info(self, protocol):
+        protocol = self._target_protocol(protocol)
+        return self._target_rpc(TARGET_INFO, bytes((protocol,)), TARGET_HELLO_SIZE)
+
+    def target_ota_begin(self, protocol, manifest):
+        protocol = self._target_protocol(protocol)
+        manifest = self._target_manifest(manifest)
+        return self._target_rpc(TARGET_OTA_BEGIN, bytes((protocol,)) + manifest, TARGET_STATUS_SIZE)
+
+    def target_ota_write(self, job_id, offset, data):
+        job = self._target_job_id(job_id)
+        if type(offset) is not int or not 0 <= offset <= 0xFFFFFFFF:
+            raise ValueError("Target write offset must be a u32")
+        if not isinstance(data, (bytes, bytearray, memoryview)):
+            raise ValueError("Target write data must be bytes")
+        data = bytes(data)
+        if not 1 <= len(data) <= TARGET_WRITE_MAX or offset > 0xFFFFFFFF - len(data):
+            raise ValueError("Target write must contain 1..983 bytes without u32 overflow")
+        payload = job + struct.pack("<I", offset) + data
+        return self._target_rpc(TARGET_OTA_WRITE, payload, TARGET_STATUS_SIZE)
+
+    def target_ota_finish(self, job_id):
+        return self._target_rpc(TARGET_OTA_FINISH, self._target_job_id(job_id), TARGET_STATUS_SIZE)
+
+    def target_ota_activate(self, job_id):
+        return self._target_rpc(TARGET_OTA_ACTIVATE, self._target_job_id(job_id), TARGET_STATUS_SIZE)
+
+    def target_ota_status(self):
+        return self._target_rpc(TARGET_OTA_STATUS, b"", TARGET_STATUS_SIZE)
+
+    def target_ota_abort(self, job_id):
+        return self._target_rpc(TARGET_OTA_ABORT, self._target_job_id(job_id), TARGET_STATUS_SIZE)
+
 def discover(address="192.168.137.255", timeout=2):
     nonce, found = secrets.token_bytes(8), {}
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -154,7 +238,9 @@ def main():
         return
     if not args.host:
         parser.error("--host is required")
-    client = Client(args.host, json.loads(args.credentials.read_text()), certificate=args.credentials.with_name("server.crt"))
+    client = Client(
+        args.host, json.loads(args.credentials.read_text()), certificate=args.credentials.with_name("server.crt")
+    )
     try:
         if args.command == "confirm":
             client.acquire()
