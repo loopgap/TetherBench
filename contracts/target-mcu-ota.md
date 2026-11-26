@@ -1,6 +1,6 @@
 # Target MCU OTA protocol v1
 
-Date: 2026-11-27. Status: C5 frame codecs, HELLO/status parsers, and signed-manifest structure/signature validation exist; RPC transport, durable lock, and target bootloader are not implemented.
+Date: 2026-11-27. Status: C5 frame codecs, HELLO/status parsers, signed-manifest validation, and read-only RPC 39 HELLO query over UART/SPI exist; update RPCs 40..45, durable lock, and target bootloader are not implemented.
 
 This contract defines updates of an MCU connected to Probe C5 over the configured UART or SPI bus. It does not describe C5's own dual-slot ESP-IDF OTA, CMSIS-DAP/SWD programming, or arbitrary raw bus access. The C5 cross-project entry remains [contracts/probe-c5.md](probe-c5.md).
 
@@ -59,7 +59,7 @@ Integers are little-endian. One decoded request or response contains a 16-byte h
 | 16 | variable | Payload |
 | 16+length | 4 | IEEE CRC-32 of header and payload |
 
-UART uses COBS encoding followed by a zero delimiter; a decoded packet is at most 1017 bytes, so the encoded packet including delimiter fits within the 1024-byte C5 bus limit. The receiver discards an invalid COBS packet through its delimiter and bounds each response by a 100 ms timeout. SPI uses mode 0 and one 1024-byte full-duplex transaction per poll; bytes after the CRC through byte 1023 must be zero. SPI is pipelined: each transaction returns the previous request's response. C5 sends `POLL` for the outstanding sequence until it receives the matching final response or the same bounded deadline expires. Only one request may be outstanding.
+UART uses COBS encoding followed by a zero delimiter; a decoded packet is at most 1017 bytes, so the encoded packet including delimiter fits within the 1024-byte C5 bus limit. The receiver discards an invalid COBS packet through its delimiter. Each C5 UART request/response transaction has one 100 ms deadline covering transmission and response reads. SPI uses mode 0 and one 1024-byte full-duplex transaction per poll; bytes after the CRC through byte 1023 must be zero. SPI is pipelined: each transaction returns the previous request's response. C5 sends `POLL` for the outstanding sequence until it receives the matching final response or the same 100 ms transaction deadline expires. Only one request may be outstanding.
 
 The target caches the last completed response. Repeating the same sequence and exact request returns that response; reusing a sequence with different contents returns `CONFLICT`. SPI `POLL` uses the outstanding sequence and is excluded from this duplicate rule; it returns `BUSY` while processing and the cached final response when ready. `WRITE` is additionally idempotent by `(job_id, offset, bytes)`: a duplicate within already written data succeeds only after readback matches; a conflicting duplicate fails. A reconnecting C5 queries `STATUS` before retrying an ambiguous operation.
 
@@ -86,4 +86,4 @@ Target response status codes are `OK=0`, `INVALID=1`, `BUSY=2`, `UNSUPPORTED=3`,
 
 Only one target update may exist on a C5 at a time. The C5 lease owns the selected UART or SPI pins. While its durable target-update lock is set, C5 rejects DAP, raw BUS, band switching, C5 OTA, and configuration of other protocols; it permits status, resume, same-protocol pin reconfiguration, and a confirmed pre-activation abort. Releasing a host lease releases electrical drivers but does not clear either update journal. C5 clears its lock only after target status confirms `CONFIRMED`, `ABORTED`, or `ROLLED_BACK`; communication errors leave the lock set.
 
-No target firmware, supported board profile, bootloader protection evidence, or UART/SPI hardware test currently exists in this repository. Until those are added and verified, C5 reports no target-OTA capability and returns `UNSUPPORTED`; this specification does not claim external MCU updates are implemented.
+No target firmware, supported board profile, bootloader protection evidence, or UART/SPI hardware test currently exists in this repository. C5 does not advertise target-OTA capability; update RPCs 40..45 remain unsupported until those requirements are implemented and verified. RPC 39 only reads HELLO and does not attest update conformance.

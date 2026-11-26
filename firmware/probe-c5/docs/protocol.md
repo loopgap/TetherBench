@@ -1,6 +1,6 @@
 # Probe C5 协议版本 1
 
-日期：2026-11-26。已有源码实现；真实验证范围见 [验收记录](validation.md)。所有多字节整数均为小端，字节偏移从 0 开始。协议字段有定义不等于所有硬件适配已经验证。
+日期：2026-11-27。已有源码实现；真实验证范围见 [验收记录](validation.md)。所有多字节整数均为小端，字节偏移从 0 开始。协议字段有定义不等于所有硬件适配已经验证。
 
 ## 传输和设备身份
 
@@ -122,13 +122,13 @@ ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日�
 | ota_journal | 0x3e0000 | 0x10000 |
 | coredump | 0x3f0000 | 0x10000 |
 
-外部 MCU 的签名双槽更新契约处于草案状态；目标 bootloader 及 C5 转发适配均未实现。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
+外部 MCU 的签名双槽更新契约处于草案状态；目标 bootloader、C5 更新 RPC 转发和持久资源锁均未实现。当前仅有只读 HELLO 查询，不代表外接 MCU OTA 可用。SWD 通过 CMSIS-DAP 调试，不伪装成外部 bootloader 更新支持。
 
-## 外部 MCU OTA 扩展草案（当前未实现）
+## 外部 MCU OTA 扩展（能力查询已接入，更新功能未实现）
 
 外部 MCU 不能使用 C5 的 176 字节自更新 manifest：目标 MCU 使用带签名回滚索引的 184 字节 manifest，并要求目标 bootloader 独立校验签名、镜像摘要、双槽、持久检查点、试启动确认和回滚。目标与 C5 的详细物理帧、UART COBS、SPI 轮询、能力字段和恢复规则见 [Target MCU OTA v1 契约](../../../contracts/target-mcu-ota.md)。
 
-规划的 C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`、`TARGET_OTA_FINISH`、`TARGET_OTA_ACTIVATE`、`TARGET_OTA_STATUS` 和 `TARGET_OTA_ABORT`。当前已有目标帧编解码与签名 manifest 校验 helper，但固件尚未注册这些 opcode，不得向 `INFO.capabilities` 声明目标更新；调用方应收到 `UNSUPPORTED`。实现前必须先加入目标端 bootloader 和可复现主机模型测试，再由 C5 组件维护本机持久资源锁；硬件闭环前继续保持未实现状态。
+规划的 C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`、`TARGET_OTA_FINISH`、`TARGET_OTA_ACTIVATE`、`TARGET_OTA_STATUS` 和 `TARGET_OTA_ABORT`。当前已有目标帧编解码、HELLO/状态记录解析、签名 manifest 校验 helper 和 39 `TARGET_INFO` 只读能力查询；更新 opcodes 40..45 尚未注册，不得向 `INFO.capabilities` 声明目标更新，更新请求应收到 `UNSUPPORTED`。下一步须先实现目标端 bootloader 和可复现主机模型，再由 C5 组件维护本机持久资源锁；硬件闭环前继续保持更新功能未实现状态。
 
 | opcode | 请求 | 成功响应 |
 |---:|---|---|
@@ -140,7 +140,7 @@ ABORT 不允许撤销 ACTIVATED，删除持久任务失败不报告成功。日�
 | 44 TARGET_OTA_STATUS | 空 | 64 字节状态 |
 | 45 TARGET_OTA_ABORT | `job_id` u64 | 64 字节状态 |
 
-TARGET_INFO 要求唯一 UART/SPI 总线已配置。HELLO 返回的运行状态使 C5 能在重启后发现尚未完成的目标任务；C5 必须先持久化同一总线的恢复锁，再开放任何目标总线操作。BEGIN 核对 board ID、镜像容量和全部必需安全能力，然后把签名 manifest 与总线协议持久化到独立更新锁；写锁成功后才向目标发 BEGIN。掉电或目标响应超时均保留锁；恢复时重新配置同一总线并查询 STATUS。更新锁期间 PINS 只允许重新配置相同总线，DAP、原始 BUS、切频、C5 自身 OTA 和其他协议配置均返回 BUSY。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。
+TARGET_INFO 是只读预检，要求唯一 UART/SPI 总线已配置，并返回经验证的 HELLO 记录；它不设置更新锁，也不代表目标符合 OTA 能力要求。开始目标写入前，C5 必须核对 board ID、镜像容量和全部必需安全能力，先持久化同一总线的恢复锁，再向目标发送 BEGIN。掉电或目标响应超时均保留锁；恢复时重新配置同一总线并查询 STATUS。更新锁期间 PINS 只允许重新配置相同总线，DAP、原始 BUS、切频、C5 自身 OTA 和其他协议配置均返回 BUSY。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。
 
 ## Wi-Fi 和协商切频
 
