@@ -250,6 +250,10 @@ test('OTA commands refresh cached state and maintenance reconciles a pending boo
   try {
     await registry.refresh(); const session = await registry.acquire('probe-1');
     const record = registry.record('probe-1');
+    clients[0].job = 41n; clients[0].phase = 1; clients[0].received = 4096; clients[0].total = 8192;
+    await registry.maintain();
+    assert.deepEqual(record.ota, { jobId: '41', phase: 1, received: 4096, checkpoint: 0, total: 8192, pendingBoot: false });
+
     record.ota = { jobId: '42', phase: 1, received: 4096, checkpoint: 4096, total: 8192, pendingBoot: false };
     const job = Buffer.alloc(8); job.writeBigUInt64LE(42n);
     await registry.command('probe-1', session.id, OP.OTA_ABORT, job);

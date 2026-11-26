@@ -654,7 +654,7 @@ export class C5Registry {
           } else await client.renew();
         }
         item.info = await client.info();
-        if (item.info.pendingBoot || item.ota?.phase === 3) {
+        if (!item.ota || item.info.pendingBoot || item.ota.phase === 3) {
           item.ota = decodeOta(await client.rpc(OP.OTA_STATUS, Buffer.alloc(0), 0n));
         }
         item.lastSeenAt = new Date(this.now()).toISOString();
