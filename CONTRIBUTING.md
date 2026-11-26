@@ -23,6 +23,6 @@ The Probe C5 project additionally requires an activated ESP-IDF installation tha
 
 ## Code quality
 
-- Gateway, console, simulator, and host tools use TypeScript with strict checking; add new host code as `.ts`, keep request parsing and resource limits at the boundary, and let errors reach the caller instead of returning a false success.
+- Gateway, console, simulator, and new host integration code use TypeScript with strict checking; add new host code as `.ts`. Existing Python provisioning and HIL scripts remain supported, keep request parsing and resource limits at the boundary, and let errors reach the caller instead of returning a false success.
 - Keep queues, buffers, retries, timeouts, and leases bounded. New stateful or security-sensitive behavior needs a focused regression test covering its failure path.
 - C5 component boundaries, C11/C++17 rules, public header placement, and formatting are defined in [Probe C5 编程规范](firmware/probe-c5/docs/coding-standards.md). Run the documented host tests, ESP-IDF build, and clang-format check for firmware changes.
