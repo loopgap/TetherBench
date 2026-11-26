@@ -26,7 +26,7 @@ Run the portable parser and transport checks with the host compiler and the Pyth
 $env:CC='D:/mingw64/bin/gcc.exe'
 & 'C:/Espressif/tools/python/v6.1.1/venv/Scripts/python.exe' firmware/probe-c5/tools/test_core.py
 $env:OPENOCD='C:/Espressif/tools/openocd-esp32/v0.12.0-esp32-20260831/openocd-esp32/bin/openocd.exe'
-node firmware/probe-c5/tools/test_debug_backend.mjs
+node firmware/probe-c5/tools/test_debug_backend.ts
 ```
 
 The OpenOCD check compiled the pinned Arm parser with GPIO test stubs and observed 18 command/response exchanges. OpenOCD reached “Interface ready” and exited successfully. On this Windows build, its TCP driver also emitted repeated `WSAGetLastError==10035` errors while polling an empty socket. The check records successful initialization only; it does not establish a clean OpenOCD transport, live wireless behavior, GPIO timing, an attached SWD target, or real target debugging.

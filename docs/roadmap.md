@@ -6,7 +6,7 @@
 |---|---|---|
 | A. 工作区基线 | 可运行本机 Gateway 模拟器和 Console；稳定公共接口 | 本地自动测试与 CI 通过；原型限制明确 |
 | B. 关键技术选型 | 以 TypeScript Gateway 为基线；只有测量到主机链路的时延、吞吐或资源瓶颈时，才对 Go/Rust 热路径做小范围对照实验 | 使用同一硬件、负载和故障场景比较 p50/p95/p99 时延、有效吞吐、资源占用与恢复时间；结果形成 ADR，不因语言偏好启动整站重写 |
-| C. C5 Probe 最小固件 | Wi-Fi 接入、身份、能力和有界会话的 ESP-IDF C/C++ 工程 | 已完成 C5 TLS RPC、租约、GPIO 总线、CMSIS-DAP、签名双槽 OTA、扫描与切频状态机；COM7 SoftAP↔COM8 STA 的 HE20 关联已验证，Gateway 硬件 RPC、目标 SWD、电气与掉电证据仍待补齐 |
+| C. C5 Probe 最小固件 | Wi-Fi 接入、身份、能力和有界会话的 ESP-IDF C/C++ 工程 | 已完成 C5 TLS RPC、租约、GPIO 总线、CMSIS-DAP、签名双槽 OTA、扫描与切频状态机；历史记录已验证 COM7 SoftAP 到 COM8 STA 的单链路 HE20 关联，但不代表 Gateway 双 C5 协商。Gateway 硬件 RPC、目标 SWD、电气与掉电证据仍待补齐 |
 | D. 调试互操作 | 通过无线探针连接 OpenOCD 或其他经验证后端 | 主机解析器、TCP 分帧和错误恢复已测；真实探针列举、GDB server 和授权目标硬件证据待完成 |
 | E. 首个端到端硬件里程碑 | 电脑经 Wi-Fi/C5 探针对授权 STM32F405 烧录和调试 | 可恢复的目标板、真实烧录/调试记录和故障恢复检查 |
 | F. P4 / OTA / 外设扩展 | 在前序边界稳定后验证 USB、OTA 和逐项总线能力 | 每个功能有具体硬件、资源测量、安全验证及回退路径 |
@@ -16,7 +16,7 @@
 
 - 本机没有 Go、OpenOCD 或 STM32 硬件工具链；ESP-IDF v6.1.1 已安装并完成 C5 构建。
 - 没有确认具体 C5/P4 板卡和电气设计，不能给出引脚、SWD 时钟或 USB High-Speed 声明。
-- `gh auth status` 为 401；仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人均未验证，因而不推送远端。
+- 仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人仍未验证；`gh` 已认证为 `loopgap`，但 main 仍等待硬件验收，因此不推送远端。
 - 设备配对、远端身份、TLS、升级密钥和 STM32 Bootloader 安全模型仍需决策。
 
-下一项最小工作：复用已验证的 COM7 SoftAP 与 COM8 STA HE20 链路，补做 Gateway 发现、TLS、租约和 DAP 的硬件闭环；随后验证签名 OTA 恢复，并在支持 HE20 的双 STA 链路上完成协商确认与回滚。控制台新增管理能力跟随这些真实操作结果闭环。真实 STM32 端到端接入、链路性能基线及 Go/Rust 对照评估列为后续阶段，不将模拟结果当作硬件验收。
+下一项最小工作：在 COM7 重新可枚举且具备 HE20 接入点后，复用已记录的 COM7 SoftAP 与 COM8 STA 单链路，补做 Gateway 发现、TLS、租约和 DAP 的硬件闭环；随后验证签名 OTA 恢复，并在支持 HE20 的双 STA 链路上完成协商确认与回滚。控制台新增管理能力跟随这些真实操作结果闭环。真实 STM32 端到端接入、链路性能基线及 Go/Rust 对照评估列为后续阶段，不将模拟结果当作硬件验收。
