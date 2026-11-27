@@ -25,6 +25,13 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
                     str(target_link / "probe_target_ota.c"), str(ROOT / "tests/target_link_test.c"),
                     "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
+    wifi = ROOT / "components/probe_wifi"
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-sign-compare", "-O2",
+                    "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
+                    "-I", str(ROOT / "tests/wifi_stubs/include"), "-I", str(wifi / "include"),
+                    "-I", str(CORE / "include"), str(ROOT / "tests/wifi_scan_test.c"),
+                    str(CORE / "probe_core.c"), "-o", str(executable)], check=True)
+    subprocess.run([str(executable)], check=True, timeout=15)
     subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
                     "-I", str(ROOT / "tests/stubs"), "-I", str(CORE / "include"),
                     "-I", str(ROOT / "components/probe_ota/include"),

@@ -47,6 +47,7 @@
 | 2026-11-27 SWD 目标模型与安全 I/O 重配 | Host CMSIS-DAP 回归新增有界 SWD 目标模型，覆盖 DP IDCODE、AP 内存单次/块读写、WAIT 重试/耗尽、FAULT、奇偶校验和期限取消；`tools/test_core.py`、IDF Python 单测 12/12、`npm run check` 9/9、相关 clang-format 与 `git diff --check` 通过。设备端在目标 OTA 锁（包括状态存储故障）下拒绝全部 PINS，主机策略回归通过；协议规定先读 INFO/CONFIG 预览冲突，等待在途有界 DAP/BUS RPC 完成后再二次确认，分步配置后逐步读回。ESP-IDF v6.1.1 构建镜像 0x120b20 字节，OTA 槽余 0xbf4e0 字节。COM7 确认为 ESP32-C5HF4 revision 1.0、4 MiB；烧录镜像 SHA 校验通过，串口日志确认 IDF v6.1.1、TLS RPC 443、UDP 4440 服务启动且未映射目标 GPIO。SWD 模型不代表目标芯片或 GPIO 电气验收；未配置 SWD 引脚、未运行实体 SWD，总线自动错线试探未启用。 |
 
 | 2026-11-27 IO 组件边界与 HIL 安全前置 | `probe_io.h` 不再导出可变引脚表或 GPIO 寄存器操作；跨组件读取经校验后复制配置，SWD 快速内联接口仅供 IO/DAP 内部使用。HIL 在获取租约前验证 INFO、48 字节 CONFIG 和 28 字节 C5 OTA 状态，活动租约、已映射引脚、未完成事务或异常状态都会中止。主机核心测试通过、Python 17/17、`npm run check` 9/9、clang-format 与 `git diff --check` 通过。ESP-IDF 6.1.1 镜像 0x120cd0 字节，最小 OTA 槽余 0xbf330 字节（40%）。COM7 烧录哈希校验通过；20 秒串口确认 IDF 6.1.1、4 MiB Flash、应用、TLS RPC 443 与 UDP 4440 启动，无新 panic。STA 报 `reason=201` 且发现为空，本次未运行 HIL；真实 SWD、GPIO 电气与目标总线仍未验收。 |
+| 2026-11-27 Wi-Fi 扫描资源回收 | 扫描失败事件与 `esp_wifi_scan_get_ap_records()` 失败后显式清除驱动 AP 列表；超时只在 `esp_wifi_scan_stop()` 成功后清理，停止失败则保留扫描状态等待完成事件。新增主机 API 替身回归，覆盖读取失败、失败事件、超时停止成功/失败、启动失败和五轮正常扫描。`python firmware/probe-c5/tools/test_core.py` 通过（核心、目标链路、OTA 替身、DAP 边界及 pyOCD 传输测试）；`cmake --build build` 用现有 ESP-IDF v6.1.1 配置构建通过，镜像 0x120f80 字节，OTA 槽余 0xbf080 字节（40%）。PowerShell 的 IDF export 因工具注册数据未识别已安装工具而失败，因此本次复用既有 IDF CMake/Ninja 配置直接构建；未烧录或运行无线 HIL。 |
 
 构建日志、串口原始日志、本机凭据在忽略提交的 `.local/`。协议与可复现工具留在源码目录。不得提交私钥、密码或原始 Flash。
 

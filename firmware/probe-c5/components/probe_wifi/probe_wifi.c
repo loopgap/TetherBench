@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static bool ready, scanning, scan_done, scanned;
+static bool ready, scanning, scan_done, scan_failed, scanned;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint64_t retry_at, scan_at, scan_started_at;
 static unsigned retry_ms = 1000;
@@ -19,6 +19,13 @@ static size_t scan_count;
 static struct tb_scan_ap scan_records[16];
 static char ip[16], identity[24];
 static esp_netif_t *netif;
+
+static void clear_scan_list(const char *reason)
+{
+    esp_err_t err = esp_wifi_clear_ap_list();
+    if (err != ESP_OK)
+        ESP_LOGW("wifi", "%s AP list cleanup failed (%d)", reason, (int)err);
+}
 
 static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -57,6 +64,7 @@ static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
         portENTER_CRITICAL(&state_lock);
         scan_done = true;
+        scan_failed = !data || ((wifi_event_sta_scan_done_t *)data)->status != 0;
         portEXIT_CRITICAL(&state_lock);
     } else if (TB_WIFI_AP && base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_sta_list_t stations;
@@ -171,51 +179,71 @@ void tb_wifi_tick(uint64_t now)
     if (retry)
         retry_at = now + 30000;
     bool timed_out = scanning && !scan_done && now >= scan_started_at && now - scan_started_at > 5000;
-    if (timed_out) {
-        scanning = false;
-        scanned = false;
-    }
+    if (timed_out)
+        scan_started_at = now;
     bool completed = scanning && scan_done;
-    if (completed)
+    bool failed = completed && scan_failed;
+    if (completed) {
         scan_done = false;
+        scan_failed = false;
+    }
     portEXIT_CRITICAL(&state_lock);
     if (timed_out) {
-        esp_wifi_scan_stop();
-        ESP_LOGW("wifi", "SSID scan timed out");
+        esp_err_t err = esp_wifi_scan_stop();
+        if (err == ESP_OK) {
+            clear_scan_list("Timed-out scan");
+            portENTER_CRITICAL(&state_lock);
+            scanning = false;
+            scanned = false;
+            scan_done = false;
+            scan_failed = false;
+            portEXIT_CRITICAL(&state_lock);
+            ESP_LOGW("wifi", "SSID scan timed out and stopped");
+        } else
+            ESP_LOGW("wifi", "SSID scan timeout stop failed (%d)", (int)err);
     }
     if (completed) {
-        wifi_ap_record_t found[16];
-        uint16_t count = 16;
-        if (esp_wifi_scan_get_ap_records(&count, found) != ESP_OK) {
+        if (failed) {
+            clear_scan_list("Failed scan");
             portENTER_CRITICAL(&state_lock);
             scanning = false;
             scanned = false;
             portEXIT_CRITICAL(&state_lock);
         } else {
-            for (unsigned i = 0; i < count; i++) {
-                struct tb_scan_ap sample = {.channel = found[i].primary,
-                                            .wifi6 = found[i].phy_11ax,
-                                            .authmode = (uint8_t)found[i].authmode,
-                                            .sightings = 1,
-                                            .rssi = {(int8_t)found[i].rssi}};
-                sample.first_seen = now;
-                memcpy(sample.bssid, found[i].bssid, 6);
-                (void)tb_scan_merge(scan_records, &scan_count, 16, &sample);
-            }
-            portENTER_CRITICAL(&state_lock);
-            scan_round++;
-            bool again = scan_round < 5;
-            if (!again) {
-                scanning = false;
-                scanned = true;
-            } else
-                scan_started_at = now;
-            portEXIT_CRITICAL(&state_lock);
-            if (again && start_scan() != ESP_OK) {
+            wifi_ap_record_t found[16];
+            uint16_t count = 16;
+            if (esp_wifi_scan_get_ap_records(&count, found) != ESP_OK) {
+                clear_scan_list("Failed result retrieval");
                 portENTER_CRITICAL(&state_lock);
                 scanning = false;
                 scanned = false;
                 portEXIT_CRITICAL(&state_lock);
+            } else {
+                for (unsigned i = 0; i < count; i++) {
+                    struct tb_scan_ap sample = {.channel = found[i].primary,
+                                                .wifi6 = found[i].phy_11ax,
+                                                .authmode = (uint8_t)found[i].authmode,
+                                                .sightings = 1,
+                                                .rssi = {(int8_t)found[i].rssi}};
+                    sample.first_seen = now;
+                    memcpy(sample.bssid, found[i].bssid, 6);
+                    (void)tb_scan_merge(scan_records, &scan_count, 16, &sample);
+                }
+                portENTER_CRITICAL(&state_lock);
+                scan_round++;
+                bool again = scan_round < 5;
+                if (!again) {
+                    scanning = false;
+                    scanned = true;
+                } else
+                    scan_started_at = now;
+                portEXIT_CRITICAL(&state_lock);
+                if (again && start_scan() != ESP_OK) {
+                    portENTER_CRITICAL(&state_lock);
+                    scanning = false;
+                    scanned = false;
+                    portEXIT_CRITICAL(&state_lock);
+                }
             }
         }
     }
@@ -301,6 +329,7 @@ enum tb_status tb_wifi_scan(uint8_t *out, size_t *size, uint64_t now)
         }
         scanning = true;
         scan_done = false;
+        scan_failed = false;
         scanned = false;
         scan_round = 0;
         scan_count = 0;
@@ -312,6 +341,7 @@ enum tb_status tb_wifi_scan(uint8_t *out, size_t *size, uint64_t now)
             portENTER_CRITICAL(&state_lock);
             scanning = false;
             scan_done = false;
+            scan_failed = false;
             portEXIT_CRITICAL(&state_lock);
             return TB_IO;
         }
