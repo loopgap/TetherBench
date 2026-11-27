@@ -313,10 +313,30 @@ static void target_records(void)
     assert(status.job_id == 7 && status.checkpoint == 1024 && status.rollback_index == 8);
     tb_put32(status_wire + 16, 4096);
     assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);
+    static const uint8_t expected_boot[] = {TB_TARGET_BOOT_NONE,          TB_TARGET_BOOT_NONE,      TB_TARGET_BOOT_NONE,
+                                            TB_TARGET_BOOT_TRIAL_PENDING, TB_TARGET_BOOT_CONFIRMED, TB_TARGET_BOOT_NONE,
+                                            TB_TARGET_BOOT_ROLLED_BACK,   TB_TARGET_BOOT_NONE};
+    for (uint8_t phase = TB_TARGET_EMPTY; phase <= TB_TARGET_FAILED; phase++) {
+        for (uint8_t boot = TB_TARGET_BOOT_NONE; boot <= TB_TARGET_BOOT_ROLLED_BACK; boot++) {
+            memset(status_wire, 0, sizeof status_wire);
+            status_wire[8] = phase;
+            status_wire[9] = boot;
+            bool valid = boot == expected_boot[phase];
+            if (phase != TB_TARGET_EMPTY) {
+                tb_put64(status_wire, 7);
+                tb_put32(status_wire + 12, phase == TB_TARGET_RECEIVING ? 2048 : 4096);
+                tb_put32(status_wire + 16, phase == TB_TARGET_RECEIVING ? 1024 : 4096);
+                tb_put32(status_wire + 20, 4096);
+                memcpy(status_wire + 32, "1.0", 4);
+            }
+            assert((tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_OK) == valid);
+        }
+    }
     tb_put32(status_wire + 12, 4096);
     const uint8_t complete_phases[] = {TB_TARGET_VERIFIED, TB_TARGET_TRIAL, TB_TARGET_CONFIRMED, TB_TARGET_ROLLED_BACK};
     for (size_t i = 0; i < sizeof complete_phases; i++) {
         status_wire[8] = complete_phases[i];
+        status_wire[9] = expected_boot[complete_phases[i]];
         assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_OK);
         tb_put32(status_wire + 16, 4095);
         assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);

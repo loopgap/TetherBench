@@ -78,6 +78,21 @@ HELLO's first 116 bytes contain protocol major/minor u16, capability flags u32, 
 
 The 64-byte status contains `job_id` u64, phase u8, boot result u8, reserved u16, received u32, durable checkpoint u32, total u32, confirmed rollback index u64, and active version `[32]`. Phases are `EMPTY=0`, `RECEIVING=1`, `VERIFIED=2`, `TRIAL=3`, `CONFIRMED=4`, `ABORTED=5`, `ROLLED_BACK=6`, `FAILED=7`. Boot results are `NONE=0`, `TRIAL_PENDING=1`, `CONFIRMED=2`, `ROLLED_BACK=3`. An `EMPTY` status is all zero. Otherwise, `job_id` and `total` are nonzero and `0 <= checkpoint <= received <= total`. `received` is the highest contiguous offset accepted and written for the current job; `checkpoint` is the highest contiguous byte offset guaranteed to survive reset. Version 1 has no fixed checkpoint granularity. In `RECEIVING`, `received` may be greater than `checkpoint`: successful `WRITE` confirms acceptance of the requested range, not durability beyond `checkpoint`. A host must resume at `checkpoint`, and the target must safely accept an identical retransmission from that offset after readback comparison. `FINISH` may enter `VERIFIED` only after persisting the complete image with `received == checkpoint == total`; `VERIFIED`, `TRIAL`, `CONFIRMED`, and `ROLLED_BACK` retain that equality. For a job-bearing status, `rollback_index` remains below that job's manifest rollback index until `CONFIRMED`, where it must equal the manifest index. `ABORTED` and `FAILED` may report partial offsets. Unknown status, phase, flag, or capability bits fail closed.
 
+Valid phase/result pairs are:
+
+| Phase | Required boot result |
+|---|---|
+| `EMPTY` | `NONE`; the entire status record must be zero |
+| `RECEIVING` | `NONE` |
+| `VERIFIED` | `NONE` |
+| `TRIAL` | `TRIAL_PENDING` |
+| `CONFIRMED` | `CONFIRMED` |
+| `ABORTED` | `NONE` |
+| `ROLLED_BACK` | `ROLLED_BACK` |
+| `FAILED` | `NONE` |
+
+Every other phase/result pair is invalid.
+
 Target response status codes are `OK=0`, `INVALID=1`, `BUSY=2`, `UNSUPPORTED=3`, `IO=4`, `INTEGRITY=5`, `STATE=6`, `CONFLICT=7`, and `TIMEOUT=8`. C5 maps these to its corresponding RPC status and never converts a target error or timeout to success.
 
 ## Recovery and resource ownership

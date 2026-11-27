@@ -145,6 +145,8 @@ C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`
 | 45 TARGET_OTA_ABORT | `job_id` u64 | 64 字节状态 |
 RPC 41..45 返回目标的 64 字节状态记录。`received` 是目标已写入的连续偏移，`checkpoint` 才是复位后保证保留的连续偏移；主机恢复必须从 `checkpoint` 开始，`received` 超前时允许重发相同字节。对 `VERIFIED`、`TRIAL`、`CONFIRMED`、`ROLLED_BACK`，C5 要求 `received == checkpoint == total`；对已确认状态，回滚计数器必须等于签名 manifest 值，其他阶段必须小于该值。状态不变式和幂等要求以 [Target MCU OTA v1 契约](../../../contracts/target-mcu-ota.md) 为准。
 
+状态的 phase/result 组合必须严格匹配：`EMPTY/NONE` 表示整条状态记录全零；有任务时 `RECEIVING/NONE`、`VERIFIED/NONE`、`ABORTED/NONE`、`FAILED/NONE`、`TRIAL/TRIAL_PENDING`、`CONFIRMED/CONFIRMED`、`ROLLED_BACK/ROLLED_BACK` 才有效。其他组合视为格式错误并保留更新锁。
+
 TARGET_INFO 是只读预检，要求唯一 UART/SPI 总线已配置，并返回经验证的 HELLO 记录；它不设置更新锁，也不代表目标符合 OTA 能力要求。Gateway 可展示其能力记录；上传入口在转发前拒绝缺少必需 OTA 能力的目标。opcode 40 的协议字节选择已配置的 UART 或 SPI，并紧接 184 字节 manifest；C5 在持久化同一总线的恢复锁之前核对 board ID、镜像容量、全部必需安全能力及非零目标 UID。若 C5 重启时已持久化锁而目标仍报告 EMPTY，C5 仅可用完全相同的 journal manifest 和 UID 重发 BEGIN，并重新检查当前回滚索引。锁定期间每次状态查询或可能改变目标状态的 RPC 前，C5 均通过 HELLO 验证 journal 中记录的 UID；不匹配、异常响应或总线错误都会保留锁并拒绝操作。
 
 opcode 44 兼容两种查询形式：空负载只读取当前持久化更新任务，必须已有更新锁；单字节 UART/SPI 协议号用于无更新锁时读取该总线 HELLO 中的状态记录。无锁查询仍要求该总线已配置且另一 UART/SPI 总线未配置。持锁时可省略协议号；若提供，必须与 journal 记录的协议一致。无锁 HELLO 状态查询不创建或清除更新锁。
