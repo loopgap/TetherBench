@@ -363,6 +363,9 @@ static void exercise_target_update(void)
     memset(chunk, 0x5c, sizeof chunk);
 
     reset_mock();
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
+    assert(out[8] == TB_TARGET_EMPTY);
+    assert(tb_target_ota_status(0, out, &size) == TB_STATE && size == 0);
     make_manifest(job_id, 2000);
     memset(hello + 96, 0, 12);
     assert(tb_target_ota_begin(TB_UART, target_manifest, sizeof target_manifest, out, &size) == TB_INVALID);
@@ -391,7 +394,7 @@ static void exercise_target_update(void)
     memset(hello + 96, 0x6b, sizeof saved_identity);
     assert(write_target_chunk(job_id, 0, chunk, 16, out, &size) == TB_CONFLICT);
     assert(tb_u32(target_status + 12) == 0 && persisted && tb_target_ota_busy());
-    assert(tb_target_ota_status(out, &size) == TB_CONFLICT && size == 0 && tb_target_ota_busy());
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_CONFLICT && size == 0 && tb_target_ota_busy());
     memcpy(hello + 96, saved_identity, sizeof saved_identity);
     assert(write_target_chunk(job_id, 0, chunk, 16, out, &size) == TB_OK);
     assert(tb_target_ota_abort((uint8_t *)&job_id, sizeof job_id, out, &size) == TB_OK);
@@ -427,7 +430,8 @@ static void exercise_target_update(void)
     assert(tb_target_ota_begin(TB_SPI, target_manifest, sizeof target_manifest, out, &size) == TB_BUSY);
     assert(tb_target_ota_init() == TB_OK && tb_target_ota_busy());
 
-    assert(tb_target_ota_status(out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
+    assert(tb_target_ota_status(TB_SPI, out, &size) == TB_BUSY && size == 0 && tb_target_ota_busy());
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
     assert(out[8] == TB_TARGET_RECEIVING);
     assert(write_target_chunk(job_id, 0, chunk, 512, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
     assert(tb_u32(out + 12) == 512);
@@ -438,19 +442,22 @@ static void exercise_target_update(void)
     assert(out[8] == TB_TARGET_VERIFIED);
     assert(tb_target_ota_activate((uint8_t *)&job_id, sizeof job_id, out, &size) == TB_OK);
     assert(out[8] == TB_TARGET_TRIAL && out[9] == TB_TARGET_BOOT_TRIAL_PENDING);
-    assert(tb_target_ota_status(out, &size) == TB_OK && tb_target_ota_busy());
+    assert(tb_target_ota_status(0, out, &size) == TB_OK && tb_target_ota_busy());
 
     target_status[8] = TB_TARGET_CONFIRMED;
     target_status[9] = TB_TARGET_BOOT_CONFIRMED;
     tb_put64(target_status + 24, 5);
+    refresh_target_status();
     fail_commit = true;
-    assert(tb_target_ota_status(out, &size) == TB_IO && tb_target_ota_busy() && persisted);
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_IO && tb_target_ota_busy() && persisted);
     fail_commit = false;
     fail_erase = true;
-    assert(tb_target_ota_status(out, &size) == TB_IO && tb_target_ota_busy() && persisted);
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_IO && tb_target_ota_busy() && persisted);
     fail_erase = false;
-    assert(tb_target_ota_status(out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
     assert(out[8] == TB_TARGET_CONFIRMED && !persisted && !tb_target_ota_busy());
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
+    assert(out[8] == TB_TARGET_CONFIRMED);
 
     reset_mock();
     make_manifest(job_id + 1, 32);

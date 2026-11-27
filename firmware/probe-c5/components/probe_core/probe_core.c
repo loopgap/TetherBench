@@ -600,6 +600,15 @@ enum tb_status tb_band_cancel(struct tb_band *b, uint64_t now, uint64_t id, bool
         b->last_switch = b->previous_last_switch;
     return TB_OK;
 }
+enum tb_status tb_band_lease_end(struct tb_band *b, bool *restore)
+{
+    if (!b || !restore)
+        return TB_INVALID;
+    *restore = false;
+    if (b->stage == TB_BAND_IDLE)
+        return TB_OK;
+    return tb_band_cancel(b, 0, b->id, restore);
+}
 int tb_band_tick(struct tb_band *b, uint64_t now)
 {
     if (b->stage == TB_BAND_IDLE && b->confirmed && now >= b->rollback_until) {

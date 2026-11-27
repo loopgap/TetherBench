@@ -515,13 +515,31 @@ enum tb_status tb_target_ota_activate(const uint8_t *data, size_t data_size, uin
     return status;
 }
 
-enum tb_status tb_target_ota_status(uint8_t *out, size_t *size)
+enum tb_status tb_target_ota_status(uint8_t protocol, uint8_t *out, size_t *size)
 {
     if (!out || !size)
         return TB_INVALID;
     *size = 0;
-    if (storage_fault || !journal_locked())
-        return storage_fault ? TB_IO : TB_STATE;
+    if (storage_fault)
+        return TB_IO;
+    if (protocol && protocol != TB_UART && protocol != TB_SPI)
+        return TB_INVALID;
+    if (!journal_locked()) {
+        if (!protocol)
+            return TB_STATE;
+        uint8_t info[TB_TARGET_HELLO_SIZE];
+        size_t info_size = 0;
+        enum tb_status status = tb_target_ota_info(protocol, info, &info_size);
+        if (status != TB_OK)
+            return status;
+        if (info_size != TB_TARGET_HELLO_SIZE)
+            return TB_INVALID;
+        memcpy(out, info + 116, TB_TARGET_STATUS_SIZE);
+        *size = TB_TARGET_STATUS_SIZE;
+        return TB_OK;
+    }
+    if (protocol && protocol != journal[5])
+        return TB_BUSY;
     uint8_t request[8];
     tb_put64(request, journal_job_id());
     struct tb_target_status_record result;

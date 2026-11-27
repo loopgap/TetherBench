@@ -41,17 +41,31 @@ static uint64_t now_ms(void)
 {
     return (uint64_t)esp_timer_get_time() / 1000;
 }
+static enum tb_status end_band_lease(void)
+{
+    if (band.stage == TB_BAND_IDLE)
+        return TB_OK;
+    struct tb_band previous = band;
+    bool restore = false;
+    enum tb_status status = tb_band_lease_end(&band, &restore);
+    if (status != TB_OK)
+        return status;
+    if (restore && tb_wifi_switch(previous.previous) != TB_OK) {
+        band = previous;
+        return TB_IO;
+    }
+    return TB_OK;
+}
 
 static void reap(uint64_t now)
 {
     if (lease.id && now >= lease.deadline) {
+        if (end_band_lease() != TB_OK)
+            return;
         tb_io_release();
         tb_dap_reset();
         lease = (struct tb_lease){0};
         previous_size = 0;
-        if (band.stage == TB_BAND_COMMITTED || band.stage == TB_BAND_SWITCHED)
-            tb_wifi_switch(band.previous);
-        band.stage = TB_BAND_IDLE;
     }
 }
 static bool empty(const struct tb_frame *f)
@@ -125,16 +139,17 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
     switch (f->op) {
     case TB_RENEW:
         return f->size == 4 ? tb_renew(&lease, now, f->lease, tb_u32(p)) : TB_INVALID;
-    case TB_RELEASE:
+    case TB_RELEASE: {
         if (!empty(f))
             return TB_INVALID;
+        enum tb_status status = end_band_lease();
+        if (status != TB_OK)
+            return status;
         tb_io_release();
         tb_dap_reset();
         lease = (struct tb_lease){0};
-        if (band.stage == TB_BAND_COMMITTED || band.stage == TB_BAND_SWITCHED)
-            tb_wifi_switch(band.previous);
-        band.stage = TB_BAND_IDLE;
         return TB_OK;
+    }
     case TB_PINS: {
         if (f->size != 12 || tb_u16(p + 2) || tb_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_STATE;
@@ -180,9 +195,16 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
     case TB_TARGET_OTA_ACTIVATE:
         return tb_target_ota_activate(p, f->size, out, size);
     case TB_TARGET_OTA_STATUS:
-        if (!empty(f))
+        if (f->size > 1 || (f->size == 1 && p[0] != TB_UART && p[0] != TB_SPI))
             return TB_INVALID;
-        return tb_target_ota_status(out, size);
+        if (f->size == 1) {
+            if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+                return TB_BUSY;
+            for (unsigned i = TB_UART; i <= TB_SPI; i++)
+                if (i != p[0] && tb_pin_config[i].count)
+                    return TB_BUSY;
+        }
+        return tb_target_ota_status(f->size ? p[0] : 0, out, size);
     case TB_TARGET_OTA_ABORT:
         return tb_target_ota_abort(p, f->size, out, size);
     case TB_OTA_BEGIN: {
@@ -395,12 +417,18 @@ static void control(void *arg)
         if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             reap(now);
             tb_wifi_tick(now);
+            struct tb_band previous = band;
             int action = tb_band_tick(&band, now);
             if (action) {
                 uint8_t channel = action > 0 ? band.channel : band.previous;
                 if (tb_wifi_switch(channel) != TB_OK) {
-                    tb_wifi_switch(band.previous);
-                    band.stage = TB_BAND_IDLE;
+                    if (action > 0 && tb_wifi_switch(band.previous) == TB_OK) {
+                        bool restore = false;
+                        tb_band_cancel(&band, now, band.id, &restore);
+                    } else {
+                        band = previous;
+                        band.deadline = now + 1000;
+                    }
                 }
             }
             if (restart_at && now >= restart_at) {

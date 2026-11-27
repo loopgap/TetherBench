@@ -220,6 +220,7 @@ enum tb_status tb_band_confirm(struct tb_band *b, uint64_t now, uint64_t id, boo
                                bool he20);
 enum tb_status tb_band_finalize(struct tb_band *b, uint64_t now, uint64_t id);
 enum tb_status tb_band_cancel(struct tb_band *b, uint64_t now, uint64_t id, bool *restore);
+enum tb_status tb_band_lease_end(struct tb_band *b, bool *restore);
 // Returns 1 to switch, -1 to restore the previous channel, 0 to keep it.
 int tb_band_tick(struct tb_band *b, uint64_t now);
 
