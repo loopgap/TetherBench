@@ -35,9 +35,11 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
     subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2",
                     "-DTB_HOST_TEST", "-DTB_HOST_EXPIRE_TEST",
                     "-I", str(CORE / "include"), "-I", str(ROOT / "components/probe_dap/include"),
+                    "-I", str(ROOT / "components/probe_dap/private"),
                     "-I", str(ROOT / "tests"), "-I", str(vendor / "Include"),
                     str(CORE / "probe_core.c"), str(vendor / "Source/DAP.c"), str(vendor / "Source/SW_DP.c"),
                     str(ROOT / "tests/dap_test.c"), "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
     subprocess.run([sys.executable, str(ROOT / "tools/test_pyocd_transport.py")], check=True, timeout=15)
     subprocess.run([sys.executable, str(ROOT / "tests/test_service_policy.py")], check=True, timeout=15)
+    subprocess.run([sys.executable, str(ROOT / "tests/test_hil_preflight.py")], check=True, timeout=15)

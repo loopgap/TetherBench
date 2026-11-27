@@ -3,7 +3,18 @@ import argparse
 import json
 import pathlib
 import struct
-from client import (Client, RpcError, CONFIG, DAP, PINS, OTA_STATUS, ACQUIRE, RELEASE, REBOOT, ROOT)
+from client import (
+    Client,
+    RpcError,
+    CONFIG,
+    DAP,
+    PINS,
+    OTA_STATUS,
+    ACQUIRE,
+    RELEASE,
+    REBOOT,
+    ROOT,
+)
 
 def expect_status(client, status, op, payload=b"", **kwargs):
     try:
@@ -13,6 +24,39 @@ def expect_status(client, status, op, payload=b"", **kwargs):
     else:
         raise AssertionError(f"opcode {op} unexpectedly succeeded")
 
+
+def validate_preflight(info, config, ota_status):
+    if (
+        info.get("leaseActive") is not False
+        or info.get("pendingBoot") is not False
+        or info.get("bandStage") != 0
+        or info.get("otaAvailable") is not True
+    ):
+        raise RuntimeError("HIL requires an idle lease/band state and a healthy C5 OTA service")
+    if len(config) != 48:
+        raise RuntimeError("HIL requires a complete 48-byte CONFIG response")
+    for index in range(4):
+        protocol, count, reserved, hz, *pins = struct.unpack_from("<BBHI4b", config, index * 12)
+        if protocol != index + 1 or count != 0 or reserved != 0 or hz != 0 or pins != [-1] * 4:
+            raise RuntimeError("HIL requires all four protocol pin maps to be unconfigured")
+    if len(ota_status) != 28:
+        raise RuntimeError("HIL requires a complete 28-byte C5 OTA status response")
+    _, phase, _, _, _, pending_boot = struct.unpack("<QIIIII", ota_status)
+    if phase not in (0, 4, 5) or pending_boot != 0:
+        raise RuntimeError("HIL requires C5 OTA to be idle or terminal with no pending boot")
+
+
+def preflight(client):
+    info = client.info()
+    if info["board"] != "esp32c5-n4" or info["protocol"] != 1:
+        raise RuntimeError("Unexpected C5 identity or protocol")
+    if not (info["wifi"]["ap"] or info["wifi"]["he20"] is True):
+        raise RuntimeError("STA must negotiate HE20 before HIL")
+    config = client.rpc(CONFIG, lease=0)
+    ota_status = client.rpc(OTA_STATUS, lease=0)
+    validate_preflight(info, config, ota_status)
+    return info
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", required=True)
@@ -21,10 +65,7 @@ def main():
     credentials = json.loads(args.credentials.read_text())
     client = Client(args.host, credentials, certificate=args.credentials.with_name("server.crt"))
     try:
-        info = client.info()
-        assert info["board"] == "esp32c5-n4" and info["protocol"] == 1
-        assert info["wifi"]["ap"] or info["wifi"]["he20"] is True, "STA must negotiate HE20"
-        assert len(client.rpc(CONFIG, lease=0)) == 48
+        info = preflight(client)
         expect_status(client, 4, RELEASE, lease=0)
         client.acquire()
         expect_status(client, 3, ACQUIRE, struct.pack("<I", 30000), lease=0)
@@ -42,7 +83,7 @@ def main():
         print(json.dumps({"result": "passed", "id": info["id"],
             "wifi": info["wifi"], "freeHeap": info["freeHeap"],
             "minHeap": info["minHeap"], "checks": ["identity", "lease", "exclusive-owner",
-            "DAP-info", "unmapped-SWD", "reserved-pins", "OTA-status"]}, indent=2))
+            "safe-preflight", "DAP-info", "unmapped-SWD", "reserved-pins", "OTA-status"]}, indent=2))
     finally:
         try:
             client.release()
