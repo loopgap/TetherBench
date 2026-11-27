@@ -1,6 +1,6 @@
 # ADR 0004: Signed dual-slot updates for attached MCUs
 
-Date: 2026-11-27. Status: accepted; implementation pending.
+Date: 2026-11-27. Status: accepted; C5 forwarding implementation present, target-side implementation and hardware verification pending.
 
 ## Decision
 
@@ -16,10 +16,11 @@ The detailed wire contract is [Target MCU OTA v1](../../contracts/target-mcu-ota
 
 ## Consequences
 
-- The current C5 firmware does not implement external MCU OTA and must continue to return `UNSUPPORTED` for it.
+- The C5 RPC dispatcher implements target forwarding, signed-manifest preflight, target identity checks, and a durable recovery lock. This does not provide target-side firmware or establish target bootloader conformance.
 - A target-side bootloader or protected update agent is required; a PC-side protocol alone cannot provide rollback or confirmation.
 - Every supported board needs an identified Flash map, protected bootloader configuration, image format, electrical profile, and hardware validation.
 - The 184-byte target manifest adds a signed rollback index without changing the existing 176-byte C5 manifest.
+- C5 RPC opcode 40 carries one protocol byte followed by the 184-byte target manifest (185 request bytes total); target-side `BEGIN` still carries the manifest alone. Opcode 44 reads the locked job with an empty request or reads HELLO status using one UART/SPI protocol byte when no job is locked.
 - Host tests may validate framing and recovery logic but cannot prove Flash atomicity, write protection, or electrical behavior.
 
 ## Open verification

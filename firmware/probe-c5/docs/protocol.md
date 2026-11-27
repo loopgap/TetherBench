@@ -137,14 +137,16 @@ C5 RPC opcode 39..45 为 `TARGET_INFO`、`TARGET_OTA_BEGIN`、`TARGET_OTA_WRITE`
 | opcode | 请求 | 成功响应 |
 |---:|---|---|
 | 39 TARGET_INFO | UART=2 或 SPI=3 u8 | 180 字节 HELLO 能力、身份和 OTA 状态 |
-| 40 TARGET_OTA_BEGIN | 184 字节 target manifest | 64 字节状态 |
+| 40 TARGET_OTA_BEGIN | protocol u8（UART=2/SPI=3）+ 184 字节 target manifest，共 185 字节 | 64 字节状态 |
 | 41 TARGET_OTA_WRITE | `job_id` u64、`offset` u32、1..983 字节 | 64 字节状态 |
 | 42 TARGET_OTA_FINISH | `job_id` u64 | 64 字节状态 |
 | 43 TARGET_OTA_ACTIVATE | `job_id` u64 | 64 字节状态 |
-| 44 TARGET_OTA_STATUS | 空 | 64 字节状态 |
+| 44 TARGET_OTA_STATUS | 有更新锁时为空；无更新锁时 protocol u8（UART=2/SPI=3） | 64 字节状态 |
 | 45 TARGET_OTA_ABORT | `job_id` u64 | 64 字节状态 |
 
-TARGET_INFO 是只读预检，要求唯一 UART/SPI 总线已配置，并返回经验证的 HELLO 记录；它不设置更新锁，也不代表目标符合 OTA 能力要求。开始目标写入前，C5 必须核对 board ID、镜像容量、全部必需安全能力及非零目标 UID，再持久化同一总线的恢复锁，然后才向目标发送 BEGIN。若 C5 重启时已持久化锁而目标仍报告 EMPTY，C5 仅可用完全相同的 journal manifest 和 UID 重发 BEGIN，并重新检查当前回滚索引。锁定期间每次状态查询或可能改变目标状态的 RPC 前，C5 均通过 HELLO 验证 journal 中记录的 UID；不匹配、异常响应或总线错误都会保留锁并拒绝操作。
+TARGET_INFO 是只读预检，要求唯一 UART/SPI 总线已配置，并返回经验证的 HELLO 记录；它不设置更新锁，也不代表目标符合 OTA 能力要求。Gateway 可展示其能力记录；上传入口在转发前拒绝缺少必需 OTA 能力的目标。opcode 40 的协议字节选择已配置的 UART 或 SPI，并紧接 184 字节 manifest；C5 在持久化同一总线的恢复锁之前核对 board ID、镜像容量、全部必需安全能力及非零目标 UID。若 C5 重启时已持久化锁而目标仍报告 EMPTY，C5 仅可用完全相同的 journal manifest 和 UID 重发 BEGIN，并重新检查当前回滚索引。锁定期间每次状态查询或可能改变目标状态的 RPC 前，C5 均通过 HELLO 验证 journal 中记录的 UID；不匹配、异常响应或总线错误都会保留锁并拒绝操作。
+
+opcode 44 兼容两种查询形式：空负载只读取当前持久化更新任务，必须已有更新锁；单字节 UART/SPI 协议号用于无更新锁时读取该总线 HELLO 中的状态记录。无锁查询仍要求该总线已配置且另一 UART/SPI 总线未配置。持锁时可省略协议号；若提供，必须与 journal 记录的协议一致。无锁 HELLO 状态查询不创建或清除更新锁。
 
 目标帧响应的状态码非 OK 时 payload 必须为空；携带 payload 的错误响应按格式错误处理。更新锁期间 PINS 仍允许同一 UART/SPI 协议重新配置，以便维修接线；切换到另一协议、DAP、原始 BUS、切频以及 C5 OTA 的所有写入类操作均返回 BUSY。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。目标 UID 校验会在每次更新 RPC 前多产生一次 HELLO 总线事务，吞吐开销需要后续在每种总线上测量；目前没有目标板实测数据。
 
@@ -160,7 +162,7 @@ opcode 49 BAND_PREPARE：transaction_id u64、candidate_channel u8、current_cha
 
 采用两端最差分数：RSSI 在 -90..-40 dBm 映射到 0..100，减去 loss_permille/10 和 rtt_ms/5，整数截断。候选至少改善 10 分；成功后驻留 30 秒。允许信道 1..11、36、40、44、48，仍受地区规则和驱动约束。
 
-opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64；设备要求网络已就绪、实际信道匹配、RSSI 至少 -80 dBm，且 STA 协商到 HE20；AP 模式要求至少一个已关联的 11ax 客户端且所有关联客户端均支持 11ax。任一条件不满足就拒绝确认，等待自动回退；成功后进入 CONFIRMED，暂留 15 秒补偿窗口。opcode 52 BAND_CANCEL：transaction_id u64，可取消 PREPARED/COMMITTED 阶段；已切换或已确认且仍在 15 秒窗口内时恢复旧信道；重复取消为幂等操作。opcode 53 BAND_FINALIZE：transaction_id u64，双端都 CONFIRM 后结束这次协调并把设备置为 IDLE，同时保留 15 秒的显式补偿窗口。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED、4 CONFIRMED。
+opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64；设备要求网络已就绪、实际信道匹配、RSSI 至少 -80 dBm，且 STA 协商到 HE20；AP 模式要求至少一个已关联的 11ax 客户端且所有关联客户端均支持 11ax。任一条件不满足就拒绝确认，等待自动回退；成功后进入 CONFIRMED，暂留 15 秒补偿窗口。opcode 52 BAND_CANCEL：transaction_id u64，可取消 PREPARED/COMMITTED 阶段；已切换或已确认且仍在 15 秒窗口内时恢复旧信道；重复取消为幂等操作。opcode 53 BAND_FINALIZE：transaction_id u64，双端都 CONFIRM 后结束这次协调并把设备置为 IDLE，同时保留 15 秒的显式补偿窗口。BAND_FINALIZE 后释放或到期租约不会清除此补偿窗口，新租约可在窗口内发送 BAND_CANCEL。相反，非 IDLE 阶段遇到 RELEASE 或租约到期会取消事务；若已切换则先恢复旧信道，再释放协议资源和租约。恢复失败时返回 IO 并保留事务与租约供后续重试。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED、4 CONFIRMED。
 
 Gateway 已实现双 C5、双方均为 HE20 STA 时的协调：五轮本地扫描、共同候选信道评分、五次当前链路探测、双端预备与提交、双端确认/完成以及失败补偿。当前链路 RTT/丢包是 Gateway 到各 C5 的 TLS 探测数据，不能称为 C5 之间的测量；扫描 RSSI 只代表 C5 到接入点。C5 AP+STA 角色协商、AP 自身候选信道干扰测量和 EMA 平滑尚未实现。Windows 热点信道由 Windows 控制，STA 不会命令它切频。无双 C5 与 Wi-Fi 6 HE20 热点的真机测试环境，主机模拟结果不能替代无线验收。
 
