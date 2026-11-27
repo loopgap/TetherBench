@@ -23,6 +23,7 @@ static size_t staged_size;
 static bool persisted, staged_write, staged_erase;
 static bool valid_manifest = true, fail_save, fail_erase, fail_commit;
 static bool fail_target_begin;
+static bool defer_checkpoint;
 
 esp_err_t nvs_flash_init_partition(const char *part)
 {
@@ -152,7 +153,9 @@ static void model_target(const struct tb_target_frame *request, const uint8_t **
             assert(offset + count <= received && !memcmp(target_image + offset, request->data + 14, count));
         }
         tb_put32(target_status + 12, received);
-        tb_put32(target_status + 16, received);
+        if (!defer_checkpoint)
+            tb_put32(target_status + 16, received);
+        defer_checkpoint = false;
         *data = target_status;
         *size = sizeof target_status;
         return;
@@ -328,6 +331,7 @@ static void reset_mock(void)
     fail_erase = false;
     fail_commit = false;
     fail_target_begin = false;
+    defer_checkpoint = false;
     fill_hello();
     assert(tb_target_ota_init() == TB_OK && !tb_target_ota_busy());
 }
@@ -433,9 +437,11 @@ static void exercise_target_update(void)
     assert(tb_target_ota_status(TB_SPI, out, &size) == TB_BUSY && size == 0 && tb_target_ota_busy());
     assert(tb_target_ota_status(TB_UART, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
     assert(out[8] == TB_TARGET_RECEIVING);
+    defer_checkpoint = true;
     assert(write_target_chunk(job_id, 0, chunk, 512, out, &size) == TB_OK && size == TB_TARGET_STATUS_SIZE);
-    assert(tb_u32(out + 12) == 512);
+    assert(tb_u32(out + 12) == 512 && tb_u32(out + 16) == 0);
     assert(write_target_chunk(job_id, 0, chunk, 512, out, &size) == TB_OK);
+    assert(tb_u32(out + 12) == 512 && tb_u32(out + 16) == 512);
     assert(write_target_chunk(job_id, 512, chunk, 983, out, &size) == TB_OK);
     assert(write_target_chunk(job_id, 1495, chunk, 505, out, &size) == TB_OK);
     assert(tb_target_ota_finish((uint8_t *)&job_id, sizeof job_id, out, &size) == TB_OK);

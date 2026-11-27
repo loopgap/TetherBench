@@ -41,6 +41,7 @@
 | pyOCD | pyOCD 0.46.1 已安装到忽略的 C5 调试环境；真实包插件列举和 CMSIS-DAP open 对本地有界 responder 通过，另有 4 项 TCP 传输回归；真实 C5 探针、GDB server 和目标 MCU 仍未验证 |
 | IDF 模拟器 | 本机 SDK QEMU 目标没有 C5，没有替代硬件结果 |
 | 虚拟 USB | USB/IP 描述符、导入和传输模型有主机测试；Windows VHCI 驱动安装和实际枚举未验证 |
+| 2026-11-27 协议边界与目标 OTA 断点语义 | 通用帧解码器/编码器新增空指针与非法状态码拒绝回归；目标 OTA 测试覆盖 `received` 超过持久化 `checkpoint` 后按 checkpoint 重传。主机 C/C++ 回归、Python 11/11、`npm run check` 8/8、clang-format 和 IDF v6.1.1 构建通过；镜像 0x120b00 字节，最小 OTA 槽余 0xbf500 字节。镜像已烧录 COM7，esptool 哈希校验通过；复位后 20 秒日志确认 IDF 6.1.1、TLS RPC 443、UDP 4440 启动且无 panic，STA 因网络协商 `reason=201` 退避。无目标 MCU，断点语义仅由 C5 主机替身测试覆盖。 |
 
 构建日志、串口原始日志、本机凭据在忽略提交的 `.local/`。协议与可复现工具留在源码目录。不得提交私钥、密码或原始 Flash。
 
