@@ -43,6 +43,7 @@
 | 虚拟 USB | USB/IP 描述符、导入和传输模型有主机测试；Windows VHCI 驱动安装和实际枚举未验证 |
 | 2026-11-27 协议边界与目标 OTA 断点语义 | 通用帧解码器/编码器新增空指针与非法状态码拒绝回归；目标 OTA 测试覆盖 `received` 超过持久化 `checkpoint` 后按 checkpoint 重传。主机 C/C++ 回归、Python 11/11、`npm run check` 8/8、clang-format 和 IDF v6.1.1 构建通过；镜像 0x120b00 字节，最小 OTA 槽余 0xbf500 字节。镜像已烧录 COM7，esptool 哈希校验通过；复位后 20 秒日志确认 IDF 6.1.1、TLS RPC 443、UDP 4440 启动且无 panic，STA 因网络协商 `reason=201` 退避。无目标 MCU，断点语义仅由 C5 主机替身测试覆盖。 |
 | 2026-11-27 目标 OTA 完成态与回滚计数器不变式 | C5 拒绝非完整 `VERIFIED/TRIAL/CONFIRMED/ROLLED_BACK` 状态，并要求 `CONFIRMED` 的回滚计数器等于签名 manifest、其他阶段严格小于该值；异常状态查询保持持久更新锁。核心/目标链路回归、Python 11/11、`npm run check` 8/8、格式与差异检查通过；ESP-IDF v6.1.1 构建镜像 0x120b40 字节，OTA 槽余 0xbf4c0 字节。已烧录 COM7 且哈希校验通过；15 秒串口捕获确认应用、TLS RPC 443 与 UDP 4440 启动，无 panic。热点广播探测为空，STA 报 `reason=201`；没有目标 MCU，不能据此验收目标 bootloader。 |
+| 2026-11-27 OTA phase/result 契约与 Gateway 会话撤销竞态 | C5 解码器拒绝全部不匹配的状态阶段/启动结果组合，核心回归穷举 8×4 组合；状态矩阵已同步到跨项目契约和 C5 协议文档。Gateway 在接收交换请求体期间若会话被撤销，返回 404；分块请求竞态回归通过。`tools/test_core.py` 通过、IDF Python 单测 11/11、`npm run check` 9/9、clang-format 与 `git diff --check` 通过。ESP-IDF v6.1.1 构建通过，镜像 0x120b70 字节，最小 OTA 槽剩余 0xbf490 字节。本次只构建，未烧录；无目标 MCU，未验证目标 bootloader。Gateway 仍是本机模拟 API。 |
 
 构建日志、串口原始日志、本机凭据在忽略提交的 `.local/`。协议与可复现工具留在源码目录。不得提交私钥、密码或原始 Flash。
 

@@ -243,6 +243,7 @@ export function createGatewayServer({ heartbeatTimeoutMs = 15_000, sweepInterval
       }
       const byteLength = Buffer.byteLength(body.data, 'utf8');
       if (byteLength > MAX_DATA_BYTES) fail(413, 'data_too_large', 'Simulated data exceeds 4096 bytes.');
+      if (sessions.get(id) !== session) fail(404, 'session_not_found', 'Session is not active.');
       json(response, 200, { data: body.data, byteLength });
       return;
     }

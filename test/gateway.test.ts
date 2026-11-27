@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { request as httpRequest } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { after, before, describe, it } from 'node:test';
 import type { Server } from 'node:http';
@@ -105,6 +106,45 @@ describe('local Gateway prototype', () => {
     assert.deepEqual((await api('/api/v1/health')).body, {
       state: 'prototype', version: projectVersion, devices: 0, sessions: 0,
     });
+  });
+
+  it('rejects an exchange whose session is released while its body is arriving', async () => {
+    const registered = await api('/api/v1/devices', {
+      method: 'POST', body: { ...vectors.device, id: 'revoked-during-exchange' },
+    });
+    const acquired = await api('/api/v1/devices/' + registered.body.id + '/sessions', { method: 'POST' });
+    const path = '/api/v1/sessions/' + acquired.body.id + '/exchange';
+    const requestStarted = new Promise((resolve) => {
+      const observe = (request) => {
+        if (request.url === path) { server.off('request', observe); resolve(); }
+      };
+      server.on('request', observe);
+    });
+    let pendingRequest;
+    const responsePromise = new Promise((resolve, reject) => {
+      pendingRequest = httpRequest(new URL(path, baseUrl), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      }, resolve);
+      pendingRequest.on('error', reject);
+      pendingRequest.write('{"data":"partial');
+    });
+
+    try {
+      await requestStarted;
+      await api('/api/v1/sessions/' + acquired.body.id, { method: 'DELETE' });
+      pendingRequest.end('"}');
+      const response = await responsePromise;
+      const drained = new Promise((resolve, reject) => {
+        response.once('end', resolve);
+        response.once('error', reject);
+      });
+      response.resume();
+      await drained;
+      assert.equal(response.statusCode, 404);
+    } finally {
+      if (!pendingRequest.destroyed) pendingRequest.destroy();
+      await api('/api/v1/devices/' + registered.body.id, { method: 'DELETE' });
+    }
   });
 
   it('rejects invalid input, oversized bodies, and cross-origin writes', async () => {
