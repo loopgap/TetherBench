@@ -3,6 +3,8 @@ import { VIEWS, PROTOCOLS, OTA_PHASES, parseRoute, hexText, pinSelection, type D
 interface C5Wifi { ap: boolean; ip: string | null; channel: number; rssi: number; phy: number }
 interface C5Info { id: string; version: string; idf: string; allowedPins: number; freeHeap: number; minHeap: number; pendingBoot: boolean; wifi: C5Wifi | null; bandStage: number }
 interface C5Ota { jobId: string; phase: 0 | 1 | 2 | 3 | 4 | 5; received: number; checkpoint: number; total: number; pendingBoot: boolean }
+interface C5TargetOta { jobId: string; phase: number; bootResult: number; received: number; checkpoint: number; total: number; rollbackIndex: string; activeVersion: string }
+interface C5TargetInfo { protocolMajor: number; protocolMinor: number; capabilities: number; maxImageLength: number; maxChunk: number; boardId: string; activeVersion: string; bootloaderVersion: string; uniqueId: string; rollbackIndex: string; status: C5TargetOta }
 interface C5Session { id: string; deviceId: string; deadline: number }
 interface C5PinConfig { protocol: number; count: number; hz: number; pins: number[] }
 interface C5Device { id: string; name: string; host: string | null; connected: boolean; info: C5Info | null; sessionActive: boolean; lastSeenAt: string | null; error: string | null; ota: C5Ota | null; adapter: string | null }
@@ -24,7 +26,7 @@ function requiredElement<T extends HTMLElement>(id: string): T {
 
 const root = requiredElement<HTMLElement>('c5-root'), notice = requiredElement<HTMLElement>('c5-notice');
 const storageKey = 'tetherbench.c5.sessions';
-const details = new Map<string, C5Status>(), drafts = new Map<string, Record<string, DraftValue>>(), outputs = new Map<string, string>();
+const details = new Map<string, C5Status>(), targetInfos = new Map<string, { protocol: 2 | 3; value: C5TargetInfo }>(), targetUpdates = new Map<string, C5TargetOta>(), drafts = new Map<string, Record<string, DraftValue>>(), outputs = new Map<string, string>();
 const sessionWarnings = new Set<string>();
 let devices: C5Device[] = [], sessions: Record<string, C5Session> = {}, activity: ActivityEntry[] = [], discoveryError: string | null = null, busy = false, refreshing = false;
 let route: Route = parseRoute(location.hash);
@@ -52,9 +54,12 @@ const panel = (title: string, content: string): string => `<section class="contr
 const actionIcons: Record<string, string> = {
   discover: 'radar', acquire: 'link', release: 'link', status: 'refresh', disable: 'stop', reboot: 'power',
   'ota/activate': 'upload', 'ota/abort': 'stop', 'boot-confirm': 'shield', 'wifi/scan': 'wifi',
+  'target-ota/info': 'refresh', 'target-ota/status': 'refresh', 'target-ota/activate': 'upload', 'target-ota/abort': 'stop',
   'adapter-start': 'play', 'adapter-stop': 'stop', 'band/commit': 'swap', clear: 'stop',
 };
-const button = (action: string, label: string, disabled = false, extra = ''): string => `<button type="button" class="button ${['discover', 'acquire'].includes(action) ? 'button-primary' : ['reboot', 'ota/abort'].includes(action) ? 'button-danger' : 'button-secondary'}" data-action="${action}" ${disabled ? 'disabled' : ''} ${extra}>${icon(actionIcons[action] ?? 'arrow')}${label}</button>`;
+const TARGET_OTA_PHASES = ['空闲', '接收中', '已校验，待激活', '目标试启动中', '已确认', '已中止', '已回滚', '失败'] as const;
+const TARGET_BOOT_RESULTS = ['无', '待试启动', '已确认', '已回滚'] as const;
+const button = (action: string, label: string, disabled = false, extra = ''): string => `<button type="button" class="button ${['discover', 'acquire'].includes(action) ? 'button-primary' : ['reboot', 'ota/abort', 'target-ota/abort'].includes(action) ? 'button-danger' : 'button-secondary'}" data-action="${action}" ${disabled ? 'disabled' : ''} ${extra}>${icon(actionIcons[action] ?? 'arrow')}${label}</button>`;
 const facts = (entries: ReadonlyArray<readonly [string, unknown]>): string => '<dl class="facts">' + entries.map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`).join('') + '</dl>';
 function heading(title: string, description: string, actions = ''): string { return `<section class="page-heading"><div><p class="eyebrow">${route.page === 'device' ? '设备工作区' : '本机连接工作区'}</p><h2 id="c5-page-title" tabindex="-1">${escape(title)}</h2><p class="subheading">${escape(description)}</p></div><div class="toolbar">${actions}</div></section>`; }
 function remember() { try { sessionStorage.setItem(storageKey, JSON.stringify(sessions)); } catch { /* Sessions remain usable in this page. */ } }
@@ -68,6 +73,11 @@ function isInvalidSession(error: unknown): boolean {
   return code === 'session_expired' || code === 'probe_4' || code === 'device_not_found';
 }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function targetProtocol(value: unknown): 2 | 3 {
+  if (value === undefined || value === '2' || value === 2) return 2;
+  if (value === '3' || value === 3) return 3;
+  throw new Error('目标链路必须选择 UART 或 SPI。');
+}
 async function api<T>(url: string, method = 'GET', body?: unknown, timeout = 15000): Promise<T> {
   const mutating = ['POST', 'PUT', 'DELETE'].includes(method.toUpperCase());
   let response: Response;
@@ -162,6 +172,8 @@ function renderDevice(): void {
   const device = selected(); if (!device) { root.innerHTML = heading('设备未配置', '该设备不在 Gateway 的本机配置中。') + '<a href="#/devices">返回设备管理</a>'; return; }
   const detail = details.get(device.id), info = detail?.info ?? device.info, ota = detail?.ota ?? device.ota, locked = busy || !device.connected || !sessions[device.id];
   let content = '';
+  const targetInfo = targetInfos.get(device.id), target = targetUpdates.get(device.id) ?? targetInfo?.value.status;
+  const targetProtocolChoice = targetProtocol(drafts.get(JSON.stringify(route))?.['target-protocol']);
   if (deviceRoute.view === 'overview') {
     content = '<div class="panel-grid">' + panel('设备状态', facts([['设备标识', info?.id ?? device.id], ['链路', device.connected ? '在线' : '离线'], ['地址', device.host], ['固件版本', info?.version], ['ESP-IDF', info?.idf], ['可用堆内存', info ? info.freeHeap + ' B' : null], ['最少可用内存', info ? info.minHeap + ' B' : null], ['最近响应', device.lastSeenAt]]))
       + panel('控制与恢复', `<p>${escape(device.error ?? '获取会话后可配置引脚并执行协议事务。')}</p><div class="form-actions">${button('status', '读取状态', busy || !device.connected)}${button('reboot', '重启 C5', locked)}${button('boot-confirm', '确认本次启动', locked || !info?.pendingBoot)}</div><p>重启释放引脚与会话。目标电气连接需按板卡原理图确认。</p>`) + '</div>';
@@ -179,6 +191,10 @@ function renderDevice(): void {
   } else if (deviceRoute.view === 'ota') {
     content = '<div class="panel-grid">' + panel('签名镜像上传', '<p>选择 176 B manifest 与对应的 .bin。设备验证签名与完整镜像，并按设备检查点续传。上传成功后单独激活。</p><form class="control-form" data-form="ota"><fieldset ' + (locked ? 'disabled' : '') + '><label>签名 manifest<input type="file" name="manifest" required></label><label>C5 固件<input type="file" name="image" accept=".bin" required></label><button class="button button-primary" type="submit">上传并校验</button></fieldset></form><p id="upload-state" role="status">等待文件。</p><progress class="control-progress" id="upload-progress" max="100" value="0" aria-label="传输进度"></progress>')
       + panel('设备更新状态', facts([['任务', ota?.jobId], ['阶段', OTA_PHASES.at(ota?.phase ?? -1) ?? '尚未读取'], ['已接收', ota ? `${ota.received} / ${ota.total} B` : null], ['持久化检查点', ota ? ota.checkpoint + ' B' : null], ['启动待确认', ota?.pendingBoot ? '是' : '否']]) + '<div class="form-actions">' + button('status', '读取状态', busy || !device.connected) + button('ota/activate', '激活并重启', locked || ota?.phase !== 2) + button('ota/abort', '中止更新', locked || !ota?.jobId || ota.jobId === '0' || ota.phase === 3) + button('boot-confirm', '确认本次启动', locked || !info?.pendingBoot) + '</div><p>新镜像需在 45 秒内通过认证并确认启动，否则设备回滚。不要将外部 MCU 镜像发送到 C5 自身更新槽。</p>') + '</div>';
+    content += '<div class="panel-grid">'
+      + panel('UART / SPI 目标 MCU 更新', '<p>先配置 UART 或 SPI 引脚，再读取目标能力。上传单个签名包：184 B manifest 紧接目标镜像。C5 与目标更新代理分别验证签名；目标端负责试启动确认和回滚。目标板尚未完成硬件验收。</p><form class="control-form" data-form="target-ota"><fieldset ' + (locked ? 'disabled' : '') + '><label>目标链路<select name="target-protocol"><option value="2" ' + (targetProtocolChoice === 2 ? 'selected' : '') + '>UART</option><option value="3" ' + (targetProtocolChoice === 3 ? 'selected' : '') + '>SPI</option></select></label><label>完整签名包<input type="file" name="target-package" accept=".tbmcu,.bin,application/octet-stream" required></label><button class="button button-primary" type="submit">上传并校验目标镜像</button></fieldset></form><p id="target-upload-state" role="status">请读取目标能力，并确认链路和板卡。</p><progress class="control-progress" id="target-upload-progress" max="100" value="0" aria-label="目标 MCU 固件传输进度"></progress><div class="form-actions">' + button('target-ota/info', '读取目标能力', locked) + button('target-ota/status', '读取目标状态', locked) + '</div>')
+      + panel('目标更新状态与恢复', facts([['链路', targetInfo ? targetInfo.protocol === 2 ? 'UART' : 'SPI' : null], ['板卡', targetInfo?.value.boardId], ['Bootloader', targetInfo?.value.bootloaderVersion], ['能力位', targetInfo ? '0x' + targetInfo.value.capabilities.toString(16).padStart(2, '0') : null], ['单槽容量', targetInfo ? targetInfo.value.maxImageLength + ' B' : null], ['最大数据块', targetInfo ? targetInfo.value.maxChunk + ' B' : null], ['任务', target?.jobId], ['阶段', target ? TARGET_OTA_PHASES.at(target.phase) ?? '未知阶段' : '尚未读取'], ['已接收 / 总长', target ? target.received + ' / ' + target.total + ' B' : null], ['持久检查点', target ? target.checkpoint + ' B' : null], ['目标回滚序号', target?.rollbackIndex ?? targetInfo?.value.rollbackIndex], ['当前目标版本', target?.activeVersion ?? targetInfo?.value.activeVersion], ['启动结果', target ? TARGET_BOOT_RESULTS.at(target.bootResult) ?? '未知' : null]]) + '<div class="form-actions">' + button('target-ota/activate', '激活目标镜像', locked || target?.phase !== 2) + button('target-ota/abort', '中止目标更新', locked || !target || ![1, 2].includes(target.phase)) + '</div><p>激活只重启外部 MCU，不重启 C5。请求结果未知时先读目标状态，再决定是否重试。</p>')
+      + '</div>';
   } else if (deviceRoute.view === 'wifi') {
     const peers = devices.filter((peer) => peer.id !== device.id && peer.connected);
     content = '<div class="panel-grid">' + panel('当前无线链路', facts([['模式', info?.wifi?.ap ? 'C5 AP' : 'STA'], ['IP', info?.wifi?.ip], ['信道', info?.wifi?.channel], ['RSSI', info?.wifi ? info.wifi.rssi + ' dBm' : null], ['PHY', info?.wifi?.phy === 5 ? 'Wi-Fi 6 HE20' : info?.wifi?.phy], ['协商阶段', info?.bandStage]]) + '<p>双 C5 协商要求两端都是空闲 HE20 STA。Windows 热点控制其自身信道，不由此操作修改。</p>') + panel('双方测量与协商', '<p>设备各做五轮 SSID 扫描。Gateway 按共同信道匹配双方可见的 Wi-Fi 6 接入点（两端 BSSID 可以不同），测量当前 TLS 往返时间；只有较差一端也提升至少 10 分才准备切换。失败时两台设备都有自动与显式补偿回滚。</p>' + (peers.length ? '<form class="control-form" data-form="band"><fieldset ' + (locked ? 'disabled' : '') + '><label>协商设备<select name="peerId" required><option value="">选择已连接的另一台 C5</option>' + peers.map((peer) => '<option value="' + escape(peer.id) + '">' + escape(peer.name) + ' · ' + escape(peer.info?.id ?? peer.id) + '</option>').join('') + '</select></label><button class="button button-primary" type="submit">测量并协商切频</button></fieldset></form>' : '<p>需要另一台已配对且在线的 C5。</p>') + '<pre class="code-output" role="status">' + escape(outputs.get(device.id + ':band') ?? '尚未执行协商。') + '</pre>') + panel('扫描候选网络', '<p>只扫描设备配置的 SSID；五轮 RSSI 中位数、观测次数和样本年龄来自 C5 本机扫描。</p>' + button('wifi/scan', '扫描 / 读取结果', locked) + '<pre class="code-output" role="status">' + escape(outputs.get(device.id + ':scan') ?? '尚未扫描。') + '</pre>') + '</div>';
@@ -190,6 +206,11 @@ async function readStatus(id: string): Promise<void> { const value = await api<C
 function cacheOta(id: string, ota: C5Ota): void {
   const detail = details.get(id); if (detail) details.set(id, { ...detail, ota });
   const device = devices.find((item) => item.id === id); if (device) device.ota = ota;
+}
+function cacheTarget(id: string, state: C5TargetOta): void {
+  targetUpdates.set(id, state);
+  const info = targetInfos.get(id);
+  if (info) targetInfos.set(id, { ...info, value: { ...info.value, status: state } });
 }
 async function refresh({ discover = false, paint = true } = {}) {
   if (refreshing) return; refreshing = true;
@@ -222,6 +243,21 @@ root.addEventListener('click', (event) => {
       if (action === 'adapter-start') { const value = await command<C5Adapter>(id, 'adapters', { type: drafts.get(JSON.stringify(route))?.['adapter-type'] ?? 'openocd' }); outputs.set(id + ':adapter', value.configuration); report('本机适配器已启动。'); }
       else { await command(id, 'adapters/stop'); outputs.delete(id + ':adapter'); report('适配器已停止。'); } return;
     }
+    if (action.startsWith('target-ota/')) {
+      if (action === 'target-ota/info') {
+        const protocol = targetProtocol(drafts.get(JSON.stringify(route))?.['target-protocol']);
+        const value = await command<C5TargetInfo>(id, action, { protocol });
+        targetInfos.set(id, { protocol, value }); cacheTarget(id, value.status); report('目标能力与状态已读取。'); return;
+      }
+      if (action === 'target-ota/status') {
+        const value = await command<C5TargetOta>(id, action); cacheTarget(id, value); report('目标更新状态已读取。'); return;
+      }
+      const current = targetUpdates.get(id) ?? targetInfos.get(id)?.value.status;
+      if (!current || current.jobId === '0') throw new Error('目标没有可操作的更新任务。');
+      const value = await command<C5TargetOta>(id, action, { jobId: current.jobId });
+      cacheTarget(id, value);
+      report(action === 'target-ota/activate' ? '目标激活已接受；请读取状态确认试启动结果。' : '目标更新已中止。'); return;
+    }
     const ota = details.get(id)?.ota ?? selected()?.ota;
     const value = await command(id, action, action.startsWith('ota/') ? { jobId: ota?.jobId } : {});
     if (action === 'wifi/scan') { outputs.set(id + ':scan', JSON.stringify(decodeScan(value.data), null, 2)); report('扫描结果已读取。'); }
@@ -235,15 +271,18 @@ function decodeScan(hex: string): C5ScanResult[] {
   if (bytes.length < 4 || view.getUint32(0, true) > 16 || bytes.length !== 4 + view.getUint32(0, true) * 16) throw new Error('扫描响应长度无效。');
   return Array.from({ length: view.getUint32(0, true) }, (_, index) => { const offset = 4 + index * 16; return { bssid: [...bytes.slice(offset, offset + 6)].map((b) => b.toString(16).padStart(2, '0')).join(':'), channel: bytes[offset + 6], rssi: view.getInt8(offset + 7), wifi6: Boolean(bytes[offset + 8]), sightings: bytes[offset + 10], ageMs: view.getUint32(offset + 12, true) }; });
 }
-function upload(id: string, manifest: File, image: File): Promise<C5Ota> {
+function upload<T>(id: string, endpoint: 'ota' | 'target-ota', body: Blob, protocol?: 2 | 3): Promise<T> {
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest(); xhr.open('POST', path(id, '/ota')); xhr.timeout = 190000; xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    const xhr = new XMLHttpRequest(); xhr.open('POST', path(id, '/' + endpoint)); xhr.timeout = 190000; xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     const session = sessions[id]; if (!session) { reject(new Error('设备会话已过期，请重新获取控制权。')); return; }
     xhr.setRequestHeader('X-TetherBench-Session', session.id);
-    xhr.upload.onprogress = (event) => { const progress = document.getElementById('upload-progress'), state = document.getElementById('upload-state'); if (progress?.tagName === 'PROGRESS' && event.lengthComputable) (progress as HTMLProgressElement).value = event.loaded / event.total * 100; if (state) state.textContent = event.loaded + ' B 已交给 Gateway，仍待设备校验。'; };
-    const recovery = '请先读取设备 OTA 状态，再重新选择相同 manifest 和镜像；C5 会按已保存检查点续传。不要自动重放其他协议事务。';
-    xhr.onerror = () => { const message = 'OTA 连接中断，设备接收结果未知。' + recovery; const state = document.getElementById('upload-state'); if (state) state.textContent = message; reject(new Error(message)); };
-    xhr.ontimeout = () => { const message = 'OTA 上传超时，设备接收结果未知。' + recovery; const state = document.getElementById('upload-state'); if (state) state.textContent = message; reject(new Error(message)); };
+    if (protocol !== undefined) xhr.setRequestHeader('X-TetherBench-Protocol', protocol === 2 ? 'uart' : 'spi');
+    const target = endpoint === 'target-ota';
+    const state = () => document.getElementById(target ? 'target-upload-state' : 'upload-state');
+    xhr.upload.onprogress = (event) => { const progress = document.getElementById(target ? 'target-upload-progress' : 'upload-progress'), state = document.getElementById(target ? 'target-upload-state' : 'upload-state'); if (progress?.tagName === 'PROGRESS' && event.lengthComputable) (progress as HTMLProgressElement).value = event.loaded / event.total * 100; if (state) state.textContent = event.loaded + ' B 已交给 Gateway，仍待设备校验。'; };
+    const recovery = target ? '请先读取目标 OTA 状态，再以相同签名包重试；C5 会从目标持久化检查点恢复。' : '请先读取设备 OTA 状态，再重新选择相同 manifest 和镜像；C5 会按已保存检查点续传。不要自动重放其他协议事务。';
+    xhr.onerror = () => { const message = 'OTA 连接中断，设备接收结果未知。' + recovery; const output = state(); if (output) output.textContent = message; reject(new Error(message)); };
+    xhr.ontimeout = () => { const message = 'OTA 上传超时，设备接收结果未知。' + recovery; const output = state(); if (output) output.textContent = message; reject(new Error(message)); };
     xhr.onload = () => {
       try {
         const raw: unknown = JSON.parse(xhr.responseText);
@@ -253,10 +292,10 @@ function upload(id: string, manifest: File, image: File): Promise<C5Ota> {
           throw new Error((typeof apiError.message === 'string' ? apiError.message : 'OTA 请求失败（HTTP ' + xhr.status + '）。') + ' ' + recovery);
         }
         if (!raw || typeof raw !== 'object') throw new Error('Gateway 返回了无效的 OTA 状态。' + recovery);
-        resolve(raw as C5Ota);
-      } catch (error) { reject(error); }
+        resolve(raw as T);
+      } catch (error) { const output = state(); if (output) output.textContent = errorText(error); reject(error); }
     };
-    xhr.send(new Blob([manifest, image]));
+    xhr.send(body);
   });
 }
 root.addEventListener('submit', (event) => {
@@ -275,7 +314,8 @@ root.addEventListener('submit', (event) => {
       await api(path(id, '/pins'), 'PUT', { sessionId: sessions[id]?.id, ...value }); await readStatus(id); drafts.delete(JSON.stringify(route)); report('引脚配置已应用。');
     } else if (type === 'bus') { const protocol = Number(data.get('protocol')); output(id, type, await command(id, 'bus', { protocol, data: hexText(data.get('data')), address: protocol === 4 ? Number(data.get('address')) : 0, receive: Number(data.get('receive')), timeoutMs: Number(data.get('timeoutMs')) })); report('协议事务已完成。'); }
     else if (type === 'dap') { output(id, type, await command(id, 'dap', { data: hexText(data.get('dap-data')) })); report('CMSIS-DAP 响应已收到。'); }
-    else if (type === 'ota') { const manifest = data.get('manifest'), image = data.get('image'); if (!(manifest instanceof File) || !(image instanceof File)) throw new Error('请选择签名 manifest 和 C5 固件镜像。'); if (manifest.size !== 176 || image.size < 288 || image.size > 0x1e0000) throw new Error('manifest 必须为 176 B，镜像须符合 C5 分区大小。'); cacheOta(id, await upload(id, manifest, image)); await readStatus(id); report('镜像已由设备校验，可以单独激活。'); }
+    else if (type === 'ota') { const manifest = data.get('manifest'), image = data.get('image'); if (!(manifest instanceof File) || !(image instanceof File)) throw new Error('请选择签名 manifest 和 C5 固件镜像。'); if (manifest.size !== 176 || image.size < 288 || image.size > 0x1e0000) throw new Error('manifest 必须为 176 B，镜像须符合 C5 分区大小。'); cacheOta(id, await upload<C5Ota>(id, 'ota', new Blob([manifest, image]))); await readStatus(id); report('镜像已由设备校验，可以单独激活。'); }
+    else if (type === 'target-ota') { const image = data.get('target-package'), protocol = targetProtocol(data.get('target-protocol')); if (!(image instanceof File)) throw new Error('请选择完整的目标 MCU 签名包。'); if (image.size < 185 || image.size > 184 + 0x1e0000) throw new Error('目标包必须包含 184 B manifest 和有效镜像，且不能超过支持的传输大小。'); cacheTarget(id, await upload<C5TargetOta>(id, 'target-ota', image, protocol)); report('目标镜像校验完成；激活仍需单独执行。'); }
     else if (type === 'band') {
       const peerId = data.get('peerId');
       const result = await api<C5BandResult>(path(id, '/wifi/negotiate'), 'POST', { sessionId: sessions[id]?.id, peerId }, 60000);

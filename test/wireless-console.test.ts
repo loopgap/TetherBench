@@ -187,11 +187,34 @@ test('OTA timeout tells the operator to read status and retry the same files for
   }
   const view = await page(null, { XMLHttpRequest: TimeoutXhr });
   view.run('sessions["c5-probe"] = { id: "session-1", deviceId: "c5-probe", deadline: 123456 }');
-  const error = await view.run('upload("c5-probe", new Blob(["manifest"]), new Blob(["image"]))').then(() => null, (value: Error) => value);
+  const error = await view.run('upload("c5-probe", "ota", new Blob(["manifest", "image"]))').then(() => null, (value: Error) => value);
   assert.match(error.message, /OTA 上传超时，设备接收结果未知/);
   assert.match(error.message, /先读取设备 OTA 状态/);
   assert.match(error.message, /重新选择相同 manifest 和镜像/);
   assert.match(view.document.getElementById('upload-state').textContent, /相同 manifest 和镜像/);
+});
+
+test('target OTA timeout is reported in its own recovery panel', async () => {
+  const requests: TimeoutXhr[] = [];
+  class TimeoutXhr {
+    upload = {};
+    headers: Record<string, string> = {};
+    url = '';
+    ontimeout?: () => void;
+    constructor() { requests.push(this); }
+    open(_method: string, url: string) { this.url = url; }
+    setRequestHeader(name: string, value: string) { this.headers[name] = value; }
+    send() { Promise.resolve().then(() => this.ontimeout?.()); }
+  }
+  const view = await page(null, { XMLHttpRequest: TimeoutXhr });
+  view.run('sessions["c5-probe"] = { id: "session-1", deviceId: "c5-probe", deadline: 123456 }');
+  const error = await view.run('upload("c5-probe", "target-ota", new Blob(["package"]), 3)').then(() => null, (value: Error) => value);
+  assert.match(error.message, /OTA 上传超时，设备接收结果未知/);
+  assert.match(error.message, /先读取目标 OTA 状态/);
+  assert.equal(view.document.getElementById('target-upload-state').textContent, error.message);
+  assert.equal(view.document.getElementById('upload-state').textContent, undefined);
+  assert.equal(requests[0].url, '/api/v1/c5/c5-probe/target-ota');
+  assert.equal(requests[0].headers['X-TetherBench-Protocol'], 'spi');
 });
 
 test('acknowledged OTA state replaces stale device and detail state before status refresh', async () => {

@@ -20,7 +20,7 @@ npm run dev
 
 ## 架构状态
 
-- **Gateway 与控制台：**本机回环 HTTP API、设备会话、C5 TLS 路由、OTA 状态与上传恢复、USB/IP 主机模型及 TypeScript 控制台；API 仍是本地 Gateway 接口，不是固件协议。
+- **Gateway 与控制台：**本机回环 HTTP API、设备会话、C5 TLS 路由、C5 与目标 MCU OTA 状态/上传恢复、USB/IP 主机模型及 TypeScript 控制台；API 仍是本地 Gateway 接口，不是固件协议。
 - **Probe C5：**独立 ESP-IDF 6.1.1 组件工程，包含 TLS RPC、可配置 GPIO 总线、CMSIS-DAP、签名双槽 OTA、目标 MCU UART/SPI OTA 转发和 STA 切频协调；详细范围与验证状态见 [C5 协议](firmware/probe-c5/docs/protocol.md) 和 [验收记录](firmware/probe-c5/docs/validation.md)。
 - **硬件限制：**Windows 热点在 2.4 GHz 只协商 11bgn，在临时 5 GHz 测试中协商 11an/VHT，均不是 HE20；固件会拒绝非 Wi-Fi 6 链路。无线发现、认证、真实 DAP/SWD、OTA 与双设备切频尚未完成真机验收。USB/IP 实际枚举也待 VHCI 驱动验证。
 - **待完成：**修复或提供可用的 Wi-Fi 6 接入链路并完成真机闭环；随后再继续扩展前端管理能力。

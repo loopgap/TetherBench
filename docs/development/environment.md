@@ -24,7 +24,7 @@ ESP-IDF v6.1.1 安装在 `D:\esp-idf\v6.1.1\esp-idf`。新 shell 默认没有激
 
 ## 当前可执行
 
-当前 Gateway、控制台和模拟器检查使用现有 Node.js/npm；2026-11-27 wireless-console `npm run check` 通过（40/40）。C5 构建使用本机已安装的 ESP-IDF v6.1.1；不需要再安装该工具链。
+当前 Gateway、控制台和模拟器检查使用现有 Node.js/npm；2026-11-27 wireless-console `npm run check` 通过（43/43）。C5 构建使用本机已安装的 ESP-IDF v6.1.1；不需要再安装该工具链。
 
 ## 后续按里程碑补充
 

@@ -24,6 +24,8 @@
 | 2026-11-27 动态状态缓存与规范回归 | `TB_TARGET_OTA_STATUS` 从成功响应缓存中排除，新增源码策略回归通过；ESP-IDF v6.1.1 Python 环境 `unittest discover` 11/11、pyOCD 传输 4/4、核心回归和 clang-format 检查通过，`npm run check` 8/8。系统 Python 3.14 未安装 `cryptography`，未将该环境结果作为固件工具验收依据 |
 | 2026-11-27 wireless-console 合入复验 | 组件化 C5 工程在 ESP-IDF v6.1.1 下重新构建通过，镜像 0x120950 字节，最小 OTA 槽剩余 0xbf6b0 字节（40%）；`tools/test_core.py`、Python 单测 11/11、clang-format 检查和根目录 `npm run check`（40/40）通过。本次未烧录，未连接目标 MCU，不构成无线、目标 OTA、掉电或 SWD 电气验收 |
 | 2026-11-27 COM8 组件版烧录与启动 | ESP32-C5HF4 rev1.2、4 MiB XMC；0x120950 镜像写入 COM8，快速差异校验失败后自动全量重写，最终哈希校验通过。20 秒串口记录确认 ESP-IDF 6.1.1、分区加载、TLS RPC 443 和 UDP 4440 服务启动，无 panic 或重启；Wi-Fi 仍因接入点不满足 HE20 以 reason=201 退避，目标引脚未分配。此记录不构成无线、目标 MCU OTA、掉电或 SWD 电气验收 |
+| 2026-11-27 Gateway target OTA 路由回归 | TypeScript C5 client 增加 39..45 编解码；Gateway 完成 target info/upload/status/activate/abort 路由，模拟 UART 分片上传、能力拒绝、状态检查和协议选择测试通过；目标 MCU bootloader、签名验签、回滚和 UART/SPI 真机仍未验证 |
+| 2026-11-27 无线总线与 Gateway 复验 | 根目录 `npm run check`：严格 TypeScript 检查、Web 构建、48/48 测试通过；Gateway 验证 UART/SPI 原始字节事务映射及协议参数拒绝；`tools/test_core.py` 通过核心/目标链路/OTA/DAP 主机检查。持续 UART/SPI 串流与目标 MCU 真机未实现或验收，不作为本次通过范围 |
 | COM7 已存 core dump | 组件版启动时发现 Flash 中有 5376 字节旧 core dump；读取到 `.local/com7-coredump-20261127.bin`。其记录的应用 SHA-256 前缀为 `50f8ff3e0`，与当前 ELF 的 `dbb060624` 不同，不能用当前符号文件可靠解析；当前启动日志没有新 panic。原始转储保留在忽略目录，未擦除 |
 | 热点和 HE20 | 未通过：2026-11-26 Windows 热点 2.4 GHz 测试为 phymode=3、he:0、ht:1；临时切换 5 GHz 后为 phymode=3、he:0、vht:1，信道 40、20 MHz、RSSI -50 dBm。两种配置均被固件按 Wi-Fi 6 要求拒绝并退避；热点频段已恢复 2.4 GHz 且保持开启。已确认本机 RZ608 支持 5/6 GHz 11ax，仍需能提供 HE20 的独立接入点 |
 | AP 端 RSSI | IDF 编译通过，核心聚合规则测试通过；AP 关联真机读数尚未验证 |
