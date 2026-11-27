@@ -85,13 +85,14 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
                                "{\"id\":\"%s\",\"board\":\"%s\",\"version\":\"%s\",\"idf\":\"%s\","
                                "\"protocol\":1,\"maxPayload\":%u,\"dapPacket\":%u,\"leaseActive\":%s,"
                                "\"allowedPins\":%" PRIu32 ",\"freeHeap\":%" PRIu32 ",\"minHeap\":%" PRIu32 ","
-                               "\"wifi\":{\"ip\":\"%s\",\"ap\":%s,\"channel\":%u,\"rssi\":%d,\"phy\":%d},"
+                               "\"wifi\":{\"ip\":\"%s\",\"ap\":%s,\"channel\":%u,\"rssi\":%d,\"phy\":%d,\"he20\":%s},"
                                "\"otaAvailable\":%s,\"pendingBoot\":%s,\"bandStage\":%u,"
                                "\"capabilities\":[\"cmsis-dap-swd\",\"uart\",\"spi-mode0\",\"i2c\",\"signed-ota-ab\"]}",
                                tb_wifi_id(), TB_BOARD_ID, esp_app_get_description()->version, esp_get_idf_version(),
                                TB_MAX_PAYLOAD, TB_DAP_PACKET, lease.id ? "true" : "false", tb_allowed_pins(),
                                esp_get_free_heap_size(), esp_get_minimum_free_heap_size(), address,
                                tb_wifi_is_ap() ? "true" : "false", tb_wifi_channel(), tb_wifi_rssi(), tb_wifi_phy(),
+                               tb_wifi_is_ap() ? "null" : (tb_wifi_he20() ? "true" : "false"),
                                ota_available ? "true" : "false", tb_ota_pending_boot() ? "true" : "false", band.stage);
         if (written < 0 || written >= TB_MAX_PAYLOAD)
             return TB_IO;

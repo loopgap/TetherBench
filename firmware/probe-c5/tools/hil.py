@@ -23,7 +23,7 @@ def main():
     try:
         info = client.info()
         assert info["board"] == "esp32c5-n4" and info["protocol"] == 1
-        assert info["wifi"]["ap"] or info["wifi"]["phy"] == 5, "STA must negotiate HE20"
+        assert info["wifi"]["ap"] or info["wifi"]["he20"] is True, "STA must negotiate HE20"
         assert len(client.rpc(CONFIG, lease=0)) == 48
         expect_status(client, 4, RELEASE, lease=0)
         client.acquire()

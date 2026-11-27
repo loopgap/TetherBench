@@ -10,6 +10,7 @@ P4 USB 桥接路线使用独立的 [P4 帧契约](bridge-p4.md)，与本文件�
 - C5 独占其 GPIO 和总线；其他固件不得依赖它的私有源码。
 - RPC 字段、状态码和事务恢复以 [C5 协议](../firmware/probe-c5/docs/protocol.md) 为准：格式错误、当前状态冲突、资源忙和 I/O 失败必须使用各自定义的状态码。
 - UDP 4440 只提供定位信息，设备身份由本机预置证书确认。
+- `INFO.wifi.he20` 是稳定的协议布尔值，仅当 STA 实际协商到 802.11ax HE20 时为 true；AP 模式为 null。`INFO.wifi.phy` 是 IDF 诊断枚举，不得作为 Wi-Fi 6 兼容判断。
 - C5 可配置为 STA 或独立 SoftAP；AP 与 STA 不同时运行。AP 模式凭据保存在本机 `.local/ap-network.json`，并以 `INFO.wifi.ap` 标识；单射频一次只有一个频段/信道。AP/STA 配对的 Gateway 自动切频协商尚未验收，当前 Gateway 仅接受 STA 角色。
 - 租约统一拥有目标资源，到期后释放。负载上限 4096 字节，DAP 上限 1024 字节。
 - 已定义的 UART/SPI/I²C 无线透传是有界 BUS 单次事务（每次收发最多 1024 字节、超时 1..100 ms），不是持续字节流；扩展协议时保留 ID 1..4，新增 ID 必须同时定义引脚角色、能力声明、事务边界、超时和复位释放行为，并同步固件、Gateway、控制台和回归检查。

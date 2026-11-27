@@ -53,7 +53,7 @@ HTTPS TCP 443，`POST /v1/rpc`，请求与响应 `Content-Type: application/octe
 
 INFO、CONFIG、OTA_STATUS 仅要求有效设备认证，其他操作必须拥有租约，ACQUIRE 除外。租约为随机非零 64 位，TTL 5000..60000 ms。释放、到期、重启会删除驱动并将目标脚设为输入。断开网络连接不等于释放租约。更新任务留在 Flash，可由新的认证租约继续。
 
-INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、leaseActive、allowedPins、freeHeap、minHeap、wifi（ip/ap/channel/rssi/phy）、otaAvailable、pendingBoot、bandStage、capabilities。STA 模式的 wifi.rssi 是关联 AP 的信号强度；AP 模式返回已关联客户端中的最低 RSSI，未关联或读取失败时为 -127。它表示当前链路，不预测候选信道。wifi.phy 是 STA 协商的 IDF 枚举值，HE20=5，失败为 -1；AP 端能力不能从该字段推断。
+INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、leaseActive、allowedPins、freeHeap、minHeap、wifi（ip/ap/channel/rssi/phy/he20）、otaAvailable、pendingBoot、bandStage、capabilities。STA 模式的 wifi.rssi 是关联 AP 的信号强度；AP 模式返回已关联客户端中的最低 RSSI，未关联或读取失败时为 -127。它表示当前链路，不预测候选信道。`wifi.he20` 是稳定的协议布尔字段：STA 模式下仅当驱动确认实际协商为 802.11ax HE20 时为 true；AP 模式为 null，因为固件只读取关联客户端的 11ax 能力位，不能据此证明每帧都使用 HE20。`wifi.phy` 仅供诊断，表示当前 ESP-IDF 的 `wifi_phy_mode_t` 数值；ESP-IDF 6.1.1 中 HE20=6，STA 查询失败或 AP 模式为 -1。控制器必须按 `wifi.he20` 判断 STA 的协议条件，不得硬编码 SDK 枚举。
 
 ## 引脚与数据事务
 
@@ -154,7 +154,7 @@ opcode 44 兼容两种查询形式：空负载只读取当前持久化更新任�
 
 C5 使用双频 AUTO，协议能力含 802.11ax，但只有一条射频链路，同一时刻只工作于一个频段和信道。默认 STA 从本机配置连接热点，得到 IP 后验证 HE20，否则断开并按 1..30 秒退避。`provision.py --ap` 配置独立 SoftAP，不启用 STA 回程；其 SSID 和随机强密码保存在忽略提交的 `.local/ap-network.json`，可用同一个文件把另一台 C5 配成 STA。AP 启动信道为 6，可按准备好的事务切到允许信道；关联客户端收到信道切换公告。AP 会拒绝不支持 802.11ax 的客户端；关联列表检查不等于逐帧 PHY 证明。
 
-INFO 的 `wifi.ap` 标明独立 AP 角色。STA 的 `wifi.ip` 是上行地址，`wifi.rssi` 和 `wifi.phy` 表示关联 AP 的链路；AP 的 `wifi.ip` 是本机 AP 地址，`wifi.rssi` 是关联客户端中最弱的读数，`wifi.phy=-1`，因为设备自身没有 STA 上行链路。AP 模式要求至少一个关联且都支持 11ax 的客户端，才允许 BAND_CONFIRM。`wireless-console` 分支的 Gateway 自动协商当前只接受 STA 角色；AP/STA 配对协商尚未完成端到端验收。
+INFO 的 `wifi.ap` 标明独立 AP 角色。STA 的 `wifi.ip` 是上行地址，`wifi.rssi` 和 `wifi.phy` 表示关联 AP 的链路；AP 的 `wifi.ip` 是本机 AP 地址，`wifi.rssi` 是关联客户端中最弱的读数，`wifi.phy=-1` 且 `wifi.he20=null`，因为设备自身没有 STA 上行链路。AP 模式要求至少一个关联且都支持 11ax 的客户端，才允许 BAND_CONFIRM。`wireless-console` 分支的 Gateway 自动协商当前只接受 STA 角色；该分支目前仍按 `wifi.phy===5` 判断 HE20，须在本分支修复后同步改用 `wifi.he20===true`，AP/STA 配对协商尚未完成端到端验收。
 
 opcode 48 WIFI_SCAN：空请求，首次启动异步扫描并连续进行五轮有界主动扫描，期间返回 BUSY；完成后返回 count u32 加最多 16 条 16 字节：BSSID[6]、channel u8、五次观测的中位 RSSI i8、五次均支持时为 1 的 phy_11ax u8、authmode u8、实际观测次数 u8、reserved u8=0、最早样本年龄 age_ms u32。STA 只扫描配置的目标 SSID；独立 AP 扫描可见网络以评估候选信道。单轮超过 5 秒或驱动错误丢弃整组结果。读取后释放，下次调用重新扫描。Gateway 可用 sightings/5 估算扫描漏检率；STA 共同候选按信道匹配，两个频段可以使用不同 BSSID。年龄和样本新鲜度用于拒绝超过 30 秒的扫描结果，扫描不能代替当前链路 RTT/丢包测量。
 
