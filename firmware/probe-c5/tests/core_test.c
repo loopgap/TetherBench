@@ -14,6 +14,8 @@ static void frames(void)
     tb_put16(wire + 6, 0);
     assert(tb_decode(wire, n, &decoded) == TB_OK);
     assert(decoded.request == f.request && decoded.lease == f.lease && decoded.size == 2);
+    assert(tb_decode(NULL, n, &decoded) == TB_INVALID);
+    assert(tb_decode(wire, n, NULL) == TB_INVALID);
     for (size_t i = 0; i < n; i++)
         assert(tb_decode(wire, i, &decoded) == TB_INVALID);
     assert(tb_decode(wire, n + 1, &decoded) == TB_INVALID);
@@ -23,6 +25,10 @@ static void frames(void)
     tb_put32(wire + 12, TB_MAX_PAYLOAD + 1);
     assert(tb_decode(wire, sizeof wire, &decoded) == TB_INVALID);
     assert(tb_encode(wire, &f, TB_OK, TB_MAX_PAYLOAD + 1) == 0);
+    assert(tb_encode(NULL, &f, TB_OK, 0) == 0);
+    assert(tb_encode(wire, NULL, TB_OK, 0) == 0);
+    assert(tb_encode(wire, &f, (enum tb_status) - 1, 0) == 0);
+    assert(tb_encode(wire, &f, (enum tb_status)11, 0) == 0);
 }
 static void leases(void)
 {

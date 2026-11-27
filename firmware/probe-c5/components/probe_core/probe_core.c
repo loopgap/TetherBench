@@ -31,7 +31,7 @@ void tb_put64(uint8_t *p, uint64_t n)
 }
 enum tb_status tb_decode(const uint8_t *p, size_t n, struct tb_frame *f)
 {
-    if (n < TB_HEADER_SIZE || memcmp(p, "TBC5", 4) || p[4] != 1 || tb_u16(p + 6) != 0 ||
+    if (!p || !f || n < TB_HEADER_SIZE || memcmp(p, "TBC5", 4) || p[4] != 1 || tb_u16(p + 6) != 0 ||
         tb_u32(p + 12) > TB_MAX_PAYLOAD || tb_u32(p + 12) != n - TB_HEADER_SIZE)
         return TB_INVALID;
     *f = (struct tb_frame){.op = p[5],
@@ -52,7 +52,7 @@ enum tb_status tb_pins_decode(const uint8_t *data, size_t size, struct tb_pins *
 }
 size_t tb_encode(uint8_t *p, const struct tb_frame *f, enum tb_status status, size_t size)
 {
-    if (size > TB_MAX_PAYLOAD)
+    if (!p || !f || (unsigned)status > TB_TIMEOUT || size > TB_MAX_PAYLOAD)
         return 0;
     memcpy(p, "TBC5", 4);
     p[4] = 1;
