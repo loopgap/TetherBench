@@ -158,7 +158,7 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
             return decoded;
         if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_STATE;
-        if (tb_target_ota_busy() && pins.protocol != tb_target_ota_protocol())
+        if (tb_target_ota_busy())
             return TB_BUSY;
         enum tb_status status = tb_io_configure(&pins);
         if (status == TB_OK && pins.protocol == TB_SWD)

@@ -40,3 +40,4 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
                     str(ROOT / "tests/dap_test.c"), "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
     subprocess.run([sys.executable, str(ROOT / "tools/test_pyocd_transport.py")], check=True, timeout=15)
+    subprocess.run([sys.executable, str(ROOT / "tests/test_service_policy.py")], check=True, timeout=15)
