@@ -1,4 +1,5 @@
 #include "probe_io.h"
+#include "probe_io_dap.h"
 #include "device_config.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
@@ -8,7 +9,8 @@
 #include "soc/soc_caps.h"
 #include <string.h>
 
-struct tb_pins tb_pin_config[TB_PROTOCOL_COUNT];
+static struct tb_pins pin_config[TB_PROTOCOL_COUNT];
+const struct tb_pins *const tb_io_swd_config = &pin_config[TB_SWD];
 static bool uart_ready, spi_ready;
 static spi_device_handle_t spi_device;
 static i2c_master_bus_handle_t i2c_bus;
@@ -18,9 +20,16 @@ uint32_t tb_allowed_pins(void)
     const uint32_t forbidden = (0x7fu << 16) | (3u << 11) | (3u << 13) | (7u << 26);
     return TB_ALLOWED_GPIO_MASK & SOC_GPIO_VALID_GPIO_MASK & ~forbidden;
 }
+enum tb_status tb_io_get_config(unsigned protocol, struct tb_pins *pins)
+{
+    if (!pins || protocol < TB_SWD || protocol >= TB_PROTOCOL_COUNT)
+        return TB_INVALID;
+    *pins = pin_config[protocol];
+    return TB_OK;
+}
 void tb_swd_off(void)
 {
-    const struct tb_pins *p = &tb_pin_config[TB_SWD];
+    const struct tb_pins *p = &pin_config[TB_SWD];
     for (unsigned i = 0; i < p->count; i++) {
         gpio_set_direction(p->pin[i], GPIO_MODE_INPUT);
         gpio_set_pull_mode(p->pin[i], GPIO_FLOATING);
@@ -28,7 +37,7 @@ void tb_swd_off(void)
 }
 void tb_swd_on(void)
 {
-    const struct tb_pins *p = &tb_pin_config[TB_SWD];
+    const struct tb_pins *p = &pin_config[TB_SWD];
     if (p->count < 2)
         return;
     for (unsigned i = 0; i < p->count; i++) {
@@ -54,7 +63,7 @@ static void release_protocol(unsigned protocol)
         i2c_del_master_bus(i2c_bus);
         i2c_bus = NULL;
     }
-    struct tb_pins *p = &tb_pin_config[protocol];
+    struct tb_pins *p = &pin_config[protocol];
     for (unsigned i = 0; i < p->count; i++) {
         gpio_reset_pin(p->pin[i]);
         gpio_set_direction(p->pin[i], GPIO_MODE_INPUT);
@@ -73,8 +82,8 @@ enum tb_status tb_io_configure(const struct tb_pins *p)
     for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++) {
         if (i == p->protocol)
             continue;
-        for (unsigned k = 0; k < tb_pin_config[i].count; k++)
-            occupied |= 1u << tb_pin_config[i].pin[k];
+        for (unsigned k = 0; k < pin_config[i].count; k++)
+            occupied |= 1u << pin_config[i].pin[k];
     }
     enum tb_status status = tb_validate_pins(p, tb_allowed_pins(), occupied);
     if (status != TB_OK)
@@ -83,7 +92,7 @@ enum tb_status tb_io_configure(const struct tb_pins *p)
     if (!p->count)
         return TB_OK;
     esp_err_t err = ESP_OK;
-    tb_pin_config[p->protocol] = *p;
+    pin_config[p->protocol] = *p;
     if (p->protocol == TB_UART) {
         uart_config_t cfg = {.baud_rate = (int)p->hz,
                              .data_bits = UART_DATA_8_BITS,
@@ -137,14 +146,14 @@ enum tb_status tb_io_bus(const uint8_t *input, size_t size, uint8_t *output, siz
     if (flags || tb_u16(input + 10) || tx > 1024 || rx > 1024 || size != 12 + tx || !timeout || timeout > 100 ||
         protocol < TB_UART || protocol > TB_I2C || (!tx && !rx))
         return TB_INVALID;
-    if (!tb_pin_config[protocol].count)
+    if (!pin_config[protocol].count)
         return TB_STATE;
     const uint8_t *data = input + 12;
     *length = 0;
     if (protocol == TB_UART) {
         if (address)
             return TB_INVALID;
-        if ((uint64_t)tx * 10000 >= (uint64_t)tb_pin_config[protocol].hz * timeout)
+        if ((uint64_t)tx * 10000 >= (uint64_t)pin_config[protocol].hz * timeout)
             return TB_INVALID;
         if (tx && uart_write_bytes(UART_NUM_1, data, tx) != (int)tx)
             return TB_IO;
@@ -161,7 +170,7 @@ enum tb_status tb_io_bus(const uint8_t *input, size_t size, uint8_t *output, siz
     if (protocol == TB_SPI) {
         if (address || (tx && rx && tx != rx))
             return TB_INVALID;
-        if ((uint64_t)(tx ? tx : rx) * 8000 >= (uint64_t)tb_pin_config[protocol].hz * timeout)
+        if ((uint64_t)(tx ? tx : rx) * 8000 >= (uint64_t)pin_config[protocol].hz * timeout)
             return TB_INVALID;
         spi_transaction_t t = {.length = 8 * (tx ? tx : rx),
                                .rxlength = 8 * rx,
@@ -176,7 +185,7 @@ enum tb_status tb_io_bus(const uint8_t *input, size_t size, uint8_t *output, siz
         return TB_INVALID;
     i2c_device_config_t cfg = {.dev_addr_length = I2C_ADDR_BIT_LEN_7,
                                .device_address = address,
-                               .scl_speed_hz = tb_pin_config[TB_I2C].hz,
+                               .scl_speed_hz = pin_config[TB_I2C].hz,
                                .scl_wait_us = 1000};
     i2c_master_dev_handle_t device;
     if (i2c_master_bus_add_device(i2c_bus, &cfg, &device) != ESP_OK)

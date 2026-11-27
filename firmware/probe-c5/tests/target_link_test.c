@@ -7,7 +7,7 @@
 #include "probe_ota.h"
 #include "probe_io.h"
 
-struct tb_pins tb_pin_config[TB_PROTOCOL_COUNT];
+static struct tb_pins test_pin_config[TB_PROTOCOL_COUNT];
 static uint8_t mock_mode, mock_status, mock_response[TB_TARGET_UART_MAX];
 static size_t mock_response_size, mock_response_offset;
 static uint8_t hello[TB_TARGET_HELLO_SIZE], target_status[TB_TARGET_STATUS_SIZE];
@@ -24,6 +24,14 @@ static bool persisted, staged_write, staged_erase;
 static bool valid_manifest = true, fail_save, fail_erase, fail_commit;
 static bool fail_target_begin;
 static bool defer_checkpoint;
+
+enum tb_status tb_io_get_config(unsigned protocol, struct tb_pins *pins)
+{
+    if (!pins || protocol < TB_SWD || protocol >= TB_PROTOCOL_COUNT)
+        return TB_INVALID;
+    *pins = test_pin_config[protocol];
+    return TB_OK;
+}
 
 esp_err_t nvs_flash_init_partition(const char *part)
 {
@@ -308,9 +316,9 @@ enum tb_status tb_io_bus(const uint8_t *input, size_t size, uint8_t *output, siz
 
 static void reset_mock(void)
 {
-    memset(tb_pin_config, 0, sizeof tb_pin_config);
-    tb_pin_config[TB_UART].count = 2;
-    tb_pin_config[TB_SPI].count = 4;
+    memset(test_pin_config, 0, sizeof test_pin_config);
+    test_pin_config[TB_UART].count = 2;
+    test_pin_config[TB_SPI].count = 4;
     mock_mode = 0;
     mock_status = TB_TARGET_OK;
     mock_response_size = 0;
@@ -527,7 +535,7 @@ int main(void)
     assert(tb_target_ota_info(TB_SPI, out, &size) == TB_TIMEOUT);
     mock_mode = 5;
     assert(tb_target_ota_info(TB_SPI, out, &size) == TB_TIMEOUT);
-    tb_pin_config[TB_SPI].count = 0;
+    test_pin_config[TB_SPI].count = 0;
     assert(tb_target_ota_info(TB_SPI, out, &size) == TB_STATE);
     assert(tb_target_ota_info(TB_I2C, out, &size) == TB_INVALID);
     exercise_target_update();

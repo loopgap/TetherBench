@@ -41,6 +41,23 @@ static uint64_t now_ms(void)
 {
     return (uint64_t)esp_timer_get_time() / 1000;
 }
+static enum tb_status io_busy_except(unsigned except, bool *busy)
+{
+    if (!busy)
+        return TB_INVALID;
+    *busy = false;
+    for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++) {
+        struct tb_pins pins;
+        enum tb_status status = tb_io_get_config(i, &pins);
+        if (status != TB_OK)
+            return status;
+        if (i != except && pins.count) {
+            *busy = true;
+            break;
+        }
+    }
+    return TB_OK;
+}
 static enum tb_status end_band_lease(void)
 {
     if (band.stage == TB_BAND_IDLE)
@@ -103,13 +120,15 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         if (!empty(f))
             return TB_INVALID;
         for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++) {
-            const struct tb_pins *pins = &tb_pin_config[i];
+            struct tb_pins pins;
+            if (tb_io_get_config(i, &pins) != TB_OK)
+                return TB_IO;
             uint8_t *record = out + *size;
             memset(record, 0, 12);
             record[0] = (uint8_t)i;
-            record[1] = pins->count;
-            tb_put32(record + 4, pins->hz);
-            memcpy(record + 8, pins->pin, 4);
+            record[1] = pins.count;
+            tb_put32(record + 4, pins.hz);
+            memcpy(record + 8, pins.pin, 4);
             *size += 12;
         }
         return TB_OK;
@@ -173,24 +192,32 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         if (tb_ota_busy() || tb_target_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
         return tb_io_bus(p, f->size, out, size);
-    case TB_TARGET_INFO:
+    case TB_TARGET_INFO: {
         if (f->size != 1 || (p[0] != TB_UART && p[0] != TB_SPI))
             return TB_INVALID;
         if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
-        for (unsigned i = TB_UART; i <= TB_SPI; i++)
-            if (i != p[0] && tb_pin_config[i].count)
-                return TB_BUSY;
+        bool busy;
+        enum tb_status status = io_busy_except(p[0], &busy);
+        if (status != TB_OK)
+            return status;
+        if (busy)
+            return TB_BUSY;
         return tb_target_ota_info(p[0], out, size);
-    case TB_TARGET_OTA_BEGIN:
+    }
+    case TB_TARGET_OTA_BEGIN: {
         if (f->size != 1 + TB_TARGET_MANIFEST_SIZE || (p[0] != TB_UART && p[0] != TB_SPI))
             return TB_INVALID;
         if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
-        for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++)
-            if (i != p[0] && tb_pin_config[i].count)
-                return TB_BUSY;
+        bool busy;
+        enum tb_status status = io_busy_except(p[0], &busy);
+        if (status != TB_OK)
+            return status;
+        if (busy)
+            return TB_BUSY;
         return tb_target_ota_begin(p[0], p + 1, f->size - 1, out, size);
+    }
     case TB_TARGET_OTA_WRITE:
         return tb_target_ota_write(p, f->size, out, size);
     case TB_TARGET_OTA_FINISH:
@@ -203,9 +230,12 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         if (f->size == 1) {
             if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
                 return TB_BUSY;
-            for (unsigned i = TB_UART; i <= TB_SPI; i++)
-                if (i != p[0] && tb_pin_config[i].count)
-                    return TB_BUSY;
+            bool busy;
+            enum tb_status status = io_busy_except(p[0], &busy);
+            if (status != TB_OK)
+                return status;
+            if (busy)
+                return TB_BUSY;
         }
         return tb_target_ota_status(f->size ? p[0] : 0, out, size);
     case TB_TARGET_OTA_ABORT:
@@ -217,10 +247,13 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
             return TB_BUSY;
         if (band.stage != TB_BAND_IDLE)
             return TB_BUSY;
-        for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++)
-            if (tb_pin_config[i].count)
-                return TB_BUSY;
-        enum tb_status status = tb_ota_begin(p, f->size);
+        bool busy;
+        enum tb_status status = io_busy_except(0, &busy);
+        if (status != TB_OK)
+            return status;
+        if (busy)
+            return TB_BUSY;
+        status = tb_ota_begin(p, f->size);
         *size = tb_ota_status(out);
         return status;
     }
@@ -274,9 +307,12 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
             return TB_INVALID;
         if (tb_ota_busy() || tb_target_ota_busy())
             return TB_BUSY;
-        for (unsigned i = 1; i < TB_PROTOCOL_COUNT; i++)
-            if (tb_pin_config[i].count)
-                return TB_BUSY;
+        bool busy;
+        enum tb_status status = io_busy_except(0, &busy);
+        if (status != TB_OK)
+            return status;
+        if (busy)
+            return TB_BUSY;
         struct tb_link links[4];
         for (unsigned i = 0; i < 4; i++) {
             const uint8_t *item = p + 12 + 12 * i;

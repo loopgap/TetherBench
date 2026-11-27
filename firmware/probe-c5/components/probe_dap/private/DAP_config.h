@@ -4,7 +4,7 @@
 #ifdef TB_HOST_TEST
 #include "tests_dap_io.h"
 #else
-#include "probe_io.h"
+#include "probe_io_dap.h"
 #include "probe_dap.h"
 #endif
 

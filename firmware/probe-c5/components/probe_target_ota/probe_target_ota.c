@@ -270,8 +270,9 @@ static enum tb_status spi_exchange(const struct tb_target_frame *request, struct
 static enum tb_status exchange(uint8_t protocol, uint8_t op, const uint8_t *data, size_t data_size,
                                uint8_t payload[TB_TARGET_PAYLOAD_MAX], size_t *payload_size)
 {
+    struct tb_pins pins;
     if (!payload || !payload_size || (data_size && !data) || data_size > TB_TARGET_PAYLOAD_MAX ||
-        (protocol != TB_UART && protocol != TB_SPI) || !tb_pin_config[protocol].count)
+        (protocol != TB_UART && protocol != TB_SPI) || tb_io_get_config(protocol, &pins) != TB_OK || !pins.count)
         return TB_STATE;
     *payload_size = 0;
     struct tb_target_frame request = {.op = op, .sequence = next_sequence(), .data = data, .size = data_size};

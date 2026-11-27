@@ -1,5 +1,6 @@
 #include "probe_dap.h"
 #include "probe_io.h"
+#include "probe_io_dap.h"
 #include "DAP.h"
 #include "esp_timer.h"
 
@@ -33,10 +34,13 @@ void tb_dap_configure(uint32_t hz)
 }
 enum tb_status tb_dap_execute(const uint8_t *input, size_t size, uint8_t *output, size_t *length)
 {
-    uint32_t hz = tb_pin_config[TB_SWD].hz;
+    struct tb_pins pins;
+    if (tb_io_get_config(TB_SWD, &pins) != TB_OK)
+        return TB_IO;
+    uint32_t hz = pins.hz;
     if (!tb_dap_validate(input, size, hz ? hz : 4000000))
         return TB_INVALID;
-    if (input[0] != 0 && input[0] != 1 && input[0] != 3 && !tb_pin_config[TB_SWD].count)
+    if (input[0] != 0 && input[0] != 1 && input[0] != 3 && !pins.count)
         return TB_STATE;
     deadline = (uint64_t)esp_timer_get_time() + 250000;
     DAP_TransferAbort = 0;
