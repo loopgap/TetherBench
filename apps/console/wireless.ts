@@ -250,7 +250,8 @@ root.addEventListener('click', (event) => {
         targetInfos.set(id, { protocol, value }); cacheTarget(id, value.status); report('目标能力与状态已读取。'); return;
       }
       if (action === 'target-ota/status') {
-        const value = await command<C5TargetOta>(id, action); cacheTarget(id, value); report('目标更新状态已读取。'); return;
+        const protocol = targetProtocol(drafts.get(JSON.stringify(route))?.['target-protocol']);
+        const value = await command<C5TargetOta>(id, action, { protocol }); cacheTarget(id, value); report('目标更新状态已读取。'); return;
       }
       const current = targetUpdates.get(id) ?? targetInfos.get(id)?.value.status;
       if (!current || current.jobId === '0') throw new Error('目标没有可操作的更新任务。');

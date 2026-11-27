@@ -88,7 +88,7 @@ class ClientTests(unittest.TestCase):
     def test_target_rpc_payloads(self):
         client = Client.__new__(Client)
         hello, status = bytes(TARGET_HELLO_SIZE), bytes(TARGET_STATUS_SIZE)
-        client.rpc = Mock(side_effect=[hello, status, status, status, status, status, status])
+        client.rpc = Mock(side_effect=[hello, status, status, status, status, status, status, status])
         manifest = target_manifest()
 
         self.assertEqual(client.target_info(SPI), hello)
@@ -97,6 +97,7 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(client.target_ota_finish(7), status)
         self.assertEqual(client.target_ota_activate(7), status)
         self.assertEqual(client.target_ota_status(), status)
+        self.assertEqual(client.target_ota_status(SPI), status)
         self.assertEqual(client.target_ota_abort(7), status)
         self.assertEqual(client.rpc.call_args_list, [
             ((TARGET_INFO, b"\x03"),),
@@ -105,6 +106,7 @@ class ClientTests(unittest.TestCase):
             ((TARGET_OTA_FINISH, struct.pack("<Q", 7)),),
             ((TARGET_OTA_ACTIVATE, struct.pack("<Q", 7)),),
             ((TARGET_OTA_STATUS, b""),),
+            ((TARGET_OTA_STATUS, b"\x03"),),
             ((TARGET_OTA_ABORT, struct.pack("<Q", 7)),),
         ])
 
@@ -123,6 +125,8 @@ class ClientTests(unittest.TestCase):
         for protocol in (0, 4, True):
             with self.subTest(protocol=protocol), self.assertRaises(ValueError):
                 client.target_info(protocol)
+            with self.subTest(status_protocol=protocol), self.assertRaises(ValueError):
+                client.target_ota_status(protocol)
         for bad_manifest in invalid_manifests:
             with self.subTest(manifest_size=len(bad_manifest)), self.assertRaises(ValueError):
                 client.target_ota_begin(UART, bad_manifest)

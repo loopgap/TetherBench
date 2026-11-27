@@ -29,7 +29,7 @@ function fixtures() {
   const registry = new C5Registry(profiles, {
     now: () => clock, discovery: async () => [],
     clientFactory(options: C5ClientOptions) {
-      const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, targetReceived: 0, targetCheckpoint: 0, targetTotal: 0, targetPhase: 0, targetJob: 0n, targetProtocol: 0, targetImage: Buffer.alloc(0), targetWriteOffsets: [], targetOverreport: false, closed: false, malformedOta: false,
+      const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, targetReceived: 0, targetCheckpoint: 0, targetTotal: 0, targetPhase: 0, targetJob: 0n, targetProtocol: 0, targetStatusProtocol: 0, targetImage: Buffer.alloc(0), targetWriteOffsets: [], targetOverreport: false, closed: false, malformedOta: false,
         close() { this.closed = true; }, async info() { if (this.closed) throw new Error('client is closed'); if (this.fail) throw new Error('connection lost'); return { id: 'c5-00000000000' + options.id.slice(-1), board: 'esp32c5-n4', pendingBoot: Boolean(this.pendingBoot) }; },
         async acquire() { this.lease = 42n; }, async renew(ttl = 30000) { this.renewed = true; this.renewTtl = ttl; }, async release() { this.lease = 0n; },
         async rpc(op: number, data: Buffer = Buffer.alloc(0)) {
@@ -65,6 +65,7 @@ function fixtures() {
           if (op === OP.TARGET_OTA_ACTIVATE) { this.targetPhase = 3; }
           if (op === OP.TARGET_OTA_ABORT) { this.targetJob = 0n; this.targetReceived = 0; this.targetTotal = 0; this.targetPhase = 0; }
           if (op === OP.TARGET_OTA_STATUS || op === OP.TARGET_OTA_BEGIN || op === OP.TARGET_OTA_WRITE || op === OP.TARGET_OTA_FINISH || op === OP.TARGET_OTA_ACTIVATE || op === OP.TARGET_OTA_ABORT) {
+            if (op === OP.TARGET_OTA_STATUS) this.targetStatusProtocol = data.length ? data[0] : 0;
             const state = Buffer.alloc(64); state.writeBigUInt64LE(this.targetJob, 0); state[8] = this.targetPhase;
             const reportedReceived = this.targetOverreport && op === OP.TARGET_OTA_WRITE ? this.targetReceived + 1 : this.targetReceived;
             state.writeUInt32LE(reportedReceived, 12); state.writeUInt32LE(this.targetCheckpoint, 16); state.writeUInt32LE(this.targetTotal, 20); Buffer.from('v1').copy(state, 32); return state;
@@ -350,7 +351,7 @@ test('target OTA rejects a write acknowledgment beyond the requested range', asy
 });
 
 test('Gateway exposes target OTA upload and status routes with protocol selection', async () => {
-  const { registry } = fixtures(); const server = createGatewayServer({ c5Registry: registry });
+  const { registry, clients } = fixtures(); const server = createGatewayServer({ c5Registry: registry });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = loopbackUrl(server);
   try {
     await registry.refresh(); const session = await registry.acquire('probe-1');
@@ -361,8 +362,12 @@ test('Gateway exposes target OTA upload and status routes with protocol selectio
       'x-tetherbench-session': session.id, 'x-tetherbench-protocol': 'uart',
     }, body: Buffer.concat([manifest, image]) });
     assert.equal(response.status, 200); assert.equal((await response.json() as { phase: number }).phase, 2);
-    const status = await fetch(base + '/api/v1/c5/probe-1/target-ota/status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: session.id }) });
+    const legacyStatus = await fetch(base + '/api/v1/c5/probe-1/target-ota/status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: session.id }) });
+    assert.equal(legacyStatus.status, 200); assert.equal((await legacyStatus.json() as { total: number }).total, image.length);
+    assert.equal(clients[0].targetStatusProtocol, 0);
+    const status = await fetch(base + '/api/v1/c5/probe-1/target-ota/status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: session.id, protocol: 'uart' }) });
     assert.equal(status.status, 200); assert.equal((await status.json() as { total: number }).total, image.length);
+    assert.equal(clients[0].targetStatusProtocol, 2);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); registry.close(); }
 });
 

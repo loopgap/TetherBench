@@ -199,8 +199,9 @@ class Client:
     def target_ota_activate(self, job_id):
         return self._target_rpc(TARGET_OTA_ACTIVATE, self._target_job_id(job_id), TARGET_STATUS_SIZE)
 
-    def target_ota_status(self):
-        return self._target_rpc(TARGET_OTA_STATUS, b"", TARGET_STATUS_SIZE)
+    def target_ota_status(self, protocol=None):
+        payload = b"" if protocol is None else bytes((self._target_protocol(protocol),))
+        return self._target_rpc(TARGET_OTA_STATUS, payload, TARGET_STATUS_SIZE)
 
     def target_ota_abort(self, job_id):
         return self._target_rpc(TARGET_OTA_ABORT, self._target_job_id(job_id), TARGET_STATUS_SIZE)

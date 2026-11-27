@@ -206,7 +206,8 @@ export async function handleC5({ request, response, pathname, registry, adapters
       json(response, 200, decodeTargetInfo(await registry.command(id, sessionId, OP.TARGET_INFO, Buffer.from([protocol])))); return true;
     }
     if (action === 'target-ota/status') {
-      json(response, 200, decodeTargetOta(await registry.command(id, sessionId, OP.TARGET_OTA_STATUS))); return true;
+      const payload = protocol === undefined ? Buffer.alloc(0) : Buffer.from([protocol]);
+      json(response, 200, decodeTargetOta(await registry.command(id, sessionId, OP.TARGET_OTA_STATUS, payload))); return true;
     }
     const job = Buffer.alloc(8); job.writeBigUInt64LE(targetJob(body.jobId));
     const op = action.endsWith('activate') ? OP.TARGET_OTA_ACTIVATE : OP.TARGET_OTA_ABORT;
