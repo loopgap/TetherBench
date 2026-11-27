@@ -57,7 +57,15 @@ INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、l
 
 ## 引脚与数据事务
 
-12 字节配置：protocol u8、count u8、reserved u16=0、hz u32、pins[4] i8。负载长度不是 12 或 reserved 非零返回 INVALID；字段范围错误返回 INVALID、GPIO 冲突返回 CONFLICT、驱动配置失败返回 IO；有效配置在 OTA 或切频事务期间返回 STATE。未用脚为 -1。count=0、hz=0、四脚全 -1 表示释放该协议。同协议重配先释放原驱动；新驱动失败时保持未配置。不同协议禁止共用任何 GPIO。CONFIG 按 SWD/UART/SPI/I2C 返回四条记录。
+12 字节配置：protocol u8、count u8、reserved u16=0、hz u32、pins[4] i8。负载长度不是 12 或 reserved 非零返回 INVALID；字段范围错误返回 INVALID、GPIO 冲突返回 CONFLICT、驱动配置失败返回 IO；C5 自身 OTA 或切频事务活动期间返回 STATE。未用脚为 -1。count=0、hz=0、四脚全 -1 表示释放该协议。同协议重配先释放原驱动；新驱动失败时会清理新驱动并保持该协议未配置。参数/冲突校验在释放旧驱动之前完成，因此这些校验失败时旧配置保留。不同协议禁止共用任何 GPIO。CONFIG 按 SWD/UART/SPI/I2C 返回四条记录。
+
+控制台或其他调用方进行可编程 I/O 重配时，先读取 INFO.allowedPins 与 CONFIG，再预览候选协议、GPIO、信号角色、时钟和现有占用。客户端根据 CONFIG 检查其他协议是否已占用候选 GPIO，并根据明确匹配的板级 profile 标注引脚功能；该检查只用于预览，CONFIG 可能已过期，C5 的 PINS 校验始终是冲突与可用性判断的权威。allowedPins 是固件允许的 GPIO 位掩码，不代表这些脚在某块开发板上未接外设，也不替代板级 profile；不得仅凭 `esp32c5-n4` 板名推断开发板接线。缺少匹配 profile 时只能将 GPIO 作为未映射编号展示，不能声称其板级用途或安全可接。
+
+界面可以暂存多个协议的候选映射，但每次 PINS RPC 只配置或释放一个协议，不是跨协议原子事务。若一个候选映射要使用另一个已配置协议占用的 GPIO，先向用户预览冲突和分步动作，再逐个释放/配置，并在每一步后读取 CONFIG。任一步失败时按 CONFIG 显示真实部分状态；PINS 不提供跨协议自动回滚，调用方不得报告原映射已恢复。
+
+PINS 是同步、不可由网页取消的设备操作。同一设备已有 DAP 或 BUS RPC 执行时，客户端必须等待该有界 RPC 返回后才能再次读取 CONFIG/allowedPins、展示二次确认并提交 PINS；不得并发提交或用浏览器取消当作总线操作已停止。若请求超时、断连或响应无法验证，状态视为不确定：先重新认证/取得租约并读取 CONFIG、INFO 及适用的 OTA/切频状态，确认设备状态后才可重试；不得把超时解释为 PINS 成功或失败。
+
+C5 自身 OTA、UART/SPI 目标 MCU OTA、非 IDLE 切频阶段或任何状态不确定期间，调用方必须禁用 PINS 并由 C5 拒绝重配。目标 OTA 期间（包括目标更新存储状态故障）PINS 返回 BUSY；C5 OTA 或 band.stage 非 IDLE 返回 STATE。先使用协议允许的安全恢复路径：未激活的 OTA 可在其状态机允许时 ABORT；目标 OTA 仅可在试启动前安全 ABORT，已激活后查询终态并等待 CONFIRMED/ROLLED_BACK；已知切频事务用 BAND_CANCEL 并核实恢复结果。恢复操作的结果未确认前不得重试 PINS。响应丢失或超时后，重新读取 INFO、CONFIG 及相关 OTA 状态，再按读回的真实状态决定下一步，不得盲目重放不同配置。BAND_FINALIZE 后的 15 秒补偿窗口仅影响切频恢复，不代表 GPIO 资源仍被占用，且不额外阻止 PINS。
 
 | protocol | 名称 | 脚位顺序 | count | 请求上限 |
 |---:|---|---|---|---|
@@ -151,7 +159,7 @@ TARGET_INFO 是只读预检，要求唯一 UART/SPI 总线已配置，并返回�
 
 opcode 44 兼容两种查询形式：空负载只读取当前持久化更新任务，必须已有更新锁；单字节 UART/SPI 协议号用于无更新锁时读取该总线 HELLO 中的状态记录。无锁查询仍要求该总线已配置且另一 UART/SPI 总线未配置。持锁时可省略协议号；若提供，必须与 journal 记录的协议一致。无锁 HELLO 状态查询不创建或清除更新锁。
 
-目标帧响应的状态码非 OK 时 payload 必须为空；携带 payload 的错误响应按格式错误处理。更新锁期间 PINS 仍允许同一 UART/SPI 协议重新配置，以便维修接线；切换到另一协议、DAP、原始 BUS、切频以及 C5 OTA 的所有写入类操作均返回 BUSY。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。目标 UID 校验会在每次更新 RPC 前多产生一次 HELLO 总线事务，吞吐开销需要后续在每种总线上测量；目前没有目标板实测数据。
+目标帧响应的状态码非 OK 时 payload 必须为空；携带 payload 的错误响应按格式错误处理。目标 OTA 持久锁期间所有 PINS 请求均被拒绝，包括 journal 所选的同一 UART/SPI 协议；目标存储状态故障也封锁 PINS。锁定期间 DAP、原始 BUS、切频及 C5 OTA 写入均被拒绝。C5 只在目标明确报告 CONFIRMED、ABORTED 或 ROLLED_BACK 后清锁。目标 UID 校验会在每次更新 RPC 前多产生一次 HELLO 总线事务，吞吐开销需要后续在每种总线上测量；目前没有目标板实测数据。
 
 ## Wi-Fi 和协商切频
 
