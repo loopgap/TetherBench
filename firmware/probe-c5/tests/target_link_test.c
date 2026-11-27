@@ -454,6 +454,11 @@ static void exercise_target_update(void)
     target_status[9] = TB_TARGET_BOOT_CONFIRMED;
     tb_put64(target_status + 24, 5);
     refresh_target_status();
+    tb_put64(target_status + 24, 4);
+    refresh_target_status();
+    assert(tb_target_ota_status(TB_UART, out, &size) == TB_CONFLICT && size == 0 && tb_target_ota_busy());
+    tb_put64(target_status + 24, 5);
+    refresh_target_status();
     fail_commit = true;
     assert(tb_target_ota_status(TB_UART, out, &size) == TB_IO && tb_target_ota_busy() && persisted);
     fail_commit = false;

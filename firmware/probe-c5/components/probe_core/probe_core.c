@@ -118,6 +118,10 @@ enum tb_status tb_target_status_decode(const uint8_t *wire, size_t size, struct 
     } else if (wire[8] == TB_TARGET_EMPTY || !total || received > total || checkpoint > received ||
                !target_string_valid(wire + 32, 32)) {
         return TB_INVALID;
+    } else if ((wire[8] == TB_TARGET_VERIFIED || wire[8] == TB_TARGET_TRIAL || wire[8] == TB_TARGET_CONFIRMED ||
+                wire[8] == TB_TARGET_ROLLED_BACK) &&
+               (received != total || checkpoint != total)) {
+        return TB_INVALID;
     }
     *status = (struct tb_target_status_record){.job_id = job_id,
                                                .phase = wire[8],

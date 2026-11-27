@@ -313,6 +313,15 @@ static void target_records(void)
     assert(status.job_id == 7 && status.checkpoint == 1024 && status.rollback_index == 8);
     tb_put32(status_wire + 16, 4096);
     assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);
+    tb_put32(status_wire + 12, 4096);
+    const uint8_t complete_phases[] = {TB_TARGET_VERIFIED, TB_TARGET_TRIAL, TB_TARGET_CONFIRMED, TB_TARGET_ROLLED_BACK};
+    for (size_t i = 0; i < sizeof complete_phases; i++) {
+        status_wire[8] = complete_phases[i];
+        assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_OK);
+        tb_put32(status_wire + 16, 4095);
+        assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);
+        tb_put32(status_wire + 16, 4096);
+    }
     memset(status_wire, 0, sizeof status_wire);
     tb_put64(status_wire, 7);
     assert(tb_target_status_decode(status_wire, sizeof status_wire, &status) == TB_INVALID);

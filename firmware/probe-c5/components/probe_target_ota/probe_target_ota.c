@@ -316,6 +316,13 @@ static uint64_t journal_job_id(void)
     return tb_u64(journal_manifest());
 }
 
+static bool rollback_matches_manifest(const struct tb_target_status_record *record, const uint8_t *manifest)
+{
+    uint64_t candidate = tb_u64(manifest + 112);
+    return record->phase == TB_TARGET_CONFIRMED ? record->rollback_index == candidate
+                                                : record->rollback_index < candidate;
+}
+
 static enum tb_status check_locked_target_identity(void)
 {
     uint8_t payload[TB_TARGET_PAYLOAD_MAX];
@@ -352,7 +359,7 @@ static enum tb_status update_status(uint8_t op, const uint8_t *data, size_t data
         return status;
     if (record->job_id != journal_job_id())
         return TB_CONFLICT;
-    if (record->total != tb_u32(journal_manifest() + 12) || record->rollback_index > tb_u64(journal_manifest() + 112))
+    if (record->total != tb_u32(journal_manifest() + 12) || !rollback_matches_manifest(record, journal_manifest()))
         return TB_CONFLICT;
     if (out)
         memcpy(out, payload, payload_size);
@@ -423,7 +430,7 @@ enum tb_status tb_target_ota_begin(uint8_t protocol, const uint8_t *data, size_t
     if (resume && hello.update.job_id && hello.update.job_id != id)
         return TB_CONFLICT;
     if (resume && terminal_phase(hello.update.phase)) {
-        if (hello.update.total != tb_u32(data + 12) || hello.update.rollback_index > tb_u64(data + 112))
+        if (hello.update.total != tb_u32(data + 12) || !rollback_matches_manifest(&hello.update, data))
             return TB_CONFLICT;
         memcpy(out, wire + 116, TB_TARGET_STATUS_SIZE);
         status = clear_lock();
