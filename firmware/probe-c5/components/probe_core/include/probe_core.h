@@ -194,6 +194,7 @@ void tb_put16(uint8_t *p, uint16_t n);
 void tb_put32(uint8_t *p, uint32_t n);
 void tb_put64(uint8_t *p, uint64_t n);
 enum tb_status tb_decode(const uint8_t *p, size_t n, struct tb_frame *f);
+enum tb_status tb_pins_decode(const uint8_t *data, size_t size, struct tb_pins *pins);
 size_t tb_encode(uint8_t *p, const struct tb_frame *f, enum tb_status status, size_t size);
 uint32_t tb_crc32(const uint8_t *data, size_t size);
 size_t tb_target_uart_encode(const struct tb_target_frame *frame, uint8_t *wire, size_t capacity);

@@ -57,7 +57,7 @@ INFO 字段：id、board、version、idf、protocol、maxPayload、dapPacket、l
 
 ## 引脚与数据事务
 
-12 字节配置：protocol u8、count u8、reserved u16=0、hz u32、pins[4] i8。未用脚为 -1。count=0、hz=0、四脚全 -1 表示释放该协议。同协议重配先释放原驱动；新驱动失败时保持未配置。不同协议禁止共用任何 GPIO。CONFIG 按 SWD/UART/SPI/I2C 返回四条记录。
+12 字节配置：protocol u8、count u8、reserved u16=0、hz u32、pins[4] i8。负载长度不是 12 或 reserved 非零返回 INVALID；字段范围错误返回 INVALID、GPIO 冲突返回 CONFLICT、驱动配置失败返回 IO；有效配置在 OTA 或切频事务期间返回 STATE。未用脚为 -1。count=0、hz=0、四脚全 -1 表示释放该协议。同协议重配先释放原驱动；新驱动失败时保持未配置。不同协议禁止共用任何 GPIO。CONFIG 按 SWD/UART/SPI/I2C 返回四条记录。
 
 | protocol | 名称 | 脚位顺序 | count | 请求上限 |
 |---:|---|---|---|---|
@@ -154,7 +154,7 @@ opcode 44 兼容两种查询形式：空负载只读取当前持久化更新任�
 
 C5 使用双频 AUTO，协议能力含 802.11ax，但只有一条射频链路，同一时刻只工作于一个频段和信道。默认 STA 从本机配置连接热点，得到 IP 后验证 HE20，否则断开并按 1..30 秒退避。`provision.py --ap` 配置独立 SoftAP，不启用 STA 回程；其 SSID 和随机强密码保存在忽略提交的 `.local/ap-network.json`，可用同一个文件把另一台 C5 配成 STA。AP 启动信道为 6，可按准备好的事务切到允许信道；关联客户端收到信道切换公告。AP 会拒绝不支持 802.11ax 的客户端；关联列表检查不等于逐帧 PHY 证明。
 
-INFO 的 `wifi.ap` 标明独立 AP 角色。STA 的 `wifi.ip` 是上行地址，`wifi.rssi` 和 `wifi.phy` 表示关联 AP 的链路；AP 的 `wifi.ip` 是本机 AP 地址，`wifi.rssi` 是关联客户端中最弱的读数，`wifi.phy=-1`，因为设备自身没有 STA 上行链路。AP 模式要求至少一个关联且都支持 11ax 的客户端，才允许 BAND_CONFIRM。Gateway 当前自动协商只接受 STA 角色；AP/STA 配对协商尚未完成端到端验收。
+INFO 的 `wifi.ap` 标明独立 AP 角色。STA 的 `wifi.ip` 是上行地址，`wifi.rssi` 和 `wifi.phy` 表示关联 AP 的链路；AP 的 `wifi.ip` 是本机 AP 地址，`wifi.rssi` 是关联客户端中最弱的读数，`wifi.phy=-1`，因为设备自身没有 STA 上行链路。AP 模式要求至少一个关联且都支持 11ax 的客户端，才允许 BAND_CONFIRM。`wireless-console` 分支的 Gateway 自动协商当前只接受 STA 角色；AP/STA 配对协商尚未完成端到端验收。
 
 opcode 48 WIFI_SCAN：空请求，首次启动异步扫描并连续进行五轮有界主动扫描，期间返回 BUSY；完成后返回 count u32 加最多 16 条 16 字节：BSSID[6]、channel u8、五次观测的中位 RSSI i8、五次均支持时为 1 的 phy_11ax u8、authmode u8、实际观测次数 u8、reserved u8=0、最早样本年龄 age_ms u32。STA 只扫描配置的目标 SSID；独立 AP 扫描可见网络以评估候选信道。单轮超过 5 秒或驱动错误丢弃整组结果。读取后释放，下次调用重新扫描。Gateway 可用 sightings/5 估算扫描漏检率；STA 共同候选按信道匹配，两个频段可以使用不同 BSSID。年龄和样本新鲜度用于拒绝超过 30 秒的扫描结果，扫描不能代替当前链路 RTT/丢包测量。
 
@@ -163,8 +163,9 @@ opcode 49 BAND_PREPARE：transaction_id u64、candidate_channel u8、current_cha
 采用两端最差分数：RSSI 在 -90..-40 dBm 映射到 0..100，减去 loss_permille/10 和 rtt_ms/5，整数截断。候选至少改善 10 分；成功后驻留 30 秒。允许信道 1..11、36、40、44、48，仍受地区规则和驱动约束。
 
 opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64；设备要求网络已就绪、实际信道匹配、RSSI 至少 -80 dBm，且 STA 协商到 HE20；AP 模式要求至少一个已关联的 11ax 客户端且所有关联客户端均支持 11ax。任一条件不满足就拒绝确认，等待自动回退；成功后进入 CONFIRMED，暂留 15 秒补偿窗口。opcode 52 BAND_CANCEL：transaction_id u64，可取消 PREPARED/COMMITTED 阶段；已切换或已确认且仍在 15 秒窗口内时恢复旧信道；重复取消为幂等操作。opcode 53 BAND_FINALIZE：transaction_id u64，双端都 CONFIRM 后结束这次协调并把设备置为 IDLE，同时保留 15 秒的显式补偿窗口。BAND_FINALIZE 后释放或到期租约不会清除此补偿窗口，新租约可在窗口内发送 BAND_CANCEL。相反，非 IDLE 阶段遇到 RELEASE 或租约到期会取消事务；若已切换则先恢复旧信道，再释放协议资源和租约。恢复失败时返回 IO 并保留事务与租约供后续重试。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED、4 CONFIRMED。
+opcode 50 BAND_COMMIT：transaction_id u64、delay_ms u32（500..3000）。PREPARE 5 秒过期；COMMIT 到期切换；切换后 15 秒内无 CONFIRM 则回退。opcode 51 BAND_CONFIRM：transaction_id u64；设备要求网络已就绪、实际信道匹配、RSSI 至少 -80 dBm，且 STA 协商到 HE20；AP 模式要求至少一个已关联的 11ax 客户端且所有关联客户端均支持 11ax。任一条件不满足就拒绝确认，等待自动回退；成功后进入 CONFIRMED，暂留 15 秒补偿窗口。opcode 52 BAND_CANCEL：transaction_id u64，可取消 PREPARED/COMMITTED 阶段；已切换或已确认且仍在 15 秒窗口内时恢复旧信道；重复取消为幂等操作。opcode 53 BAND_FINALIZE：transaction_id u64，双端都 CONFIRM 后结束这次协调并把设备置为 IDLE，同时保留 15 秒的显式补偿窗口。BAND_FINALIZE 后释放或到期租约不会清除此补偿窗口，新租约可在窗口内发送 BAND_CANCEL。相反，非 IDLE 阶段遇到 RELEASE 或租约到期会取消事务；若已切换则先恢复旧信道，再释放协议资源和租约。恢复失败时返回 IO 并保留事务与租约供后续重试。bandStage：0 IDLE、1 PREPARED、2 COMMITTED、3 SWITCHED、4 CONFIRMED。
 
-Gateway 已实现双 C5、双方均为 HE20 STA 时的协调：五轮本地扫描、共同候选信道评分、五次当前链路探测、双端预备与提交、双端确认/完成以及失败补偿。当前链路 RTT/丢包是 Gateway 到各 C5 的 TLS 探测数据，不能称为 C5 之间的测量；扫描 RSSI 只代表 C5 到接入点。C5 AP+STA 角色协商、AP 自身候选信道干扰测量和 EMA 平滑尚未实现。Windows 热点信道由 Windows 控制，STA 不会命令它切频。无双 C5 与 Wi-Fi 6 HE20 热点的真机测试环境，主机模拟结果不能替代无线验收。
+`wireless-console` 分支的 Gateway 对双 C5、双方均为 HE20 STA 的协商实现五轮本地扫描、共同候选信道评分、五次当前链路探测、双端预备与提交、双端确认/完成以及失败补偿。当前 `main` 不含该 Gateway 协调器。当前链路 RTT/丢包是 Gateway 到各 C5 的 TLS 探测数据，不能称为 C5 之间的测量；扫描 RSSI 只代表 C5 到接入点。C5 AP+STA 角色协商、AP 自身候选信道干扰测量和 EMA 平滑尚未实现。Windows 热点信道由 Windows 控制，STA 不会命令它切频。无双 C5 与 Wi-Fi 6 HE20 热点的真机测试环境，主机模拟结果不能替代无线验收。
 
 ## UDP 发现与安全边界
 

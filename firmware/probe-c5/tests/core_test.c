@@ -65,6 +65,22 @@ static void pins(void)
     p.pin[0] = 2;
     assert(tb_validate_pins(&p, allowed, 0) == TB_INVALID);
 }
+static void pin_request_decode(void)
+{
+    uint8_t request[12] = {TB_SWD, 3, 0, 0, 0, 0, 0, 0, 2, 3, 4, 0xff};
+    tb_put32(request + 4, 4000000);
+    struct tb_pins pins = {0};
+    assert(tb_pins_decode(request, sizeof request, &pins) == TB_OK);
+    assert(pins.protocol == TB_SWD && pins.count == 3 && pins.hz == 4000000);
+    assert(pins.pin[0] == 2 && pins.pin[1] == 3 && pins.pin[2] == 4 && pins.pin[3] == -1);
+    for (size_t size = 0; size < sizeof request; size++)
+        assert(tb_pins_decode(request, size, &pins) == TB_INVALID);
+    assert(tb_pins_decode(request, sizeof request + 1, &pins) == TB_INVALID);
+    request[2] = 1;
+    assert(tb_pins_decode(request, sizeof request, &pins) == TB_INVALID);
+    assert(tb_pins_decode(NULL, sizeof request, &pins) == TB_INVALID);
+    assert(tb_pins_decode(request, sizeof request, NULL) == TB_INVALID);
+}
 static void dap(void)
 {
     const uint8_t transfer[] = {5, 0, 2, 2, 0, 1, 2, 3, 4};
@@ -300,6 +316,7 @@ int main(void)
     frames();
     leases();
     pins();
+    pin_request_decode();
     dap();
     bands();
     wireless_rssi();

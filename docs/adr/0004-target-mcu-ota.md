@@ -21,6 +21,11 @@ The detailed wire contract is [Target MCU OTA v1](../../contracts/target-mcu-ota
 - Every supported board needs an identified Flash map, protected bootloader configuration, image format, electrical profile, and hardware validation.
 - The 184-byte target manifest adds a signed rollback index without changing the existing 176-byte C5 manifest.
 - C5 RPC opcode 40 carries one protocol byte followed by the 184-byte target manifest (185 request bytes total); target-side `BEGIN` still carries the manifest alone. Opcode 44 reads the locked job with an empty request or reads HELLO status using one UART/SPI protocol byte when no job is locked.
+- The C5 RPC dispatcher implements target framing, signed-manifest preflight, target identity checks, UART/SPI forwarding, resumable status handling, and a durable recovery lock. This does not provide target-side firmware or establish target bootloader conformance.
+- A target-side bootloader or protected update agent is required; a PC-side protocol alone cannot provide rollback or confirmation.
+- Every supported board needs an identified Flash map, protected bootloader configuration, image format, electrical profile, and hardware validation.
+- The 184-byte target manifest adds a signed rollback index without changing the existing 176-byte C5 manifest.
+- C5 RPC opcode 40 carries one protocol byte followed by the 184-byte target manifest (185 request bytes total); target-side `BEGIN` still carries the manifest alone. Opcode 44 reads the locked job with an empty request or reads HELLO status using one UART/SPI protocol byte when no job is locked.
 - Host tests may validate framing and recovery logic but cannot prove Flash atomicity, write protection, or electrical behavior.
 
 ## Open verification

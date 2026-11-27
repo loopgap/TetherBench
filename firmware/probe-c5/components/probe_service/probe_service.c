@@ -151,10 +151,12 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         return TB_OK;
     }
     case TB_PINS: {
-        if (f->size != 12 || tb_u16(p + 2) || tb_ota_busy() || band.stage != TB_BAND_IDLE)
+        struct tb_pins pins;
+        enum tb_status decoded = tb_pins_decode(p, f->size, &pins);
+        if (decoded != TB_OK)
+            return decoded;
+        if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_STATE;
-        struct tb_pins pins = {.protocol = p[0], .count = p[1], .hz = tb_u32(p + 4)};
-        memcpy(pins.pin, p + 8, 4);
         if (tb_target_ota_busy() && pins.protocol != tb_target_ota_protocol())
             return TB_BUSY;
         enum tb_status status = tb_io_configure(&pins);

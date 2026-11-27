@@ -41,6 +41,15 @@ enum tb_status tb_decode(const uint8_t *p, size_t n, struct tb_frame *f)
                            .size = n - TB_HEADER_SIZE};
     return TB_OK;
 }
+enum tb_status tb_pins_decode(const uint8_t *data, size_t size, struct tb_pins *pins)
+{
+    if (!data || !pins || size != 12 || tb_u16(data + 2))
+        return TB_INVALID;
+    struct tb_pins decoded = {.protocol = data[0], .count = data[1], .hz = tb_u32(data + 4)};
+    memcpy(decoded.pin, data + 8, sizeof decoded.pin);
+    *pins = decoded;
+    return TB_OK;
+}
 size_t tb_encode(uint8_t *p, const struct tb_frame *f, enum tb_status status, size_t size)
 {
     if (size > TB_MAX_PAYLOAD)
