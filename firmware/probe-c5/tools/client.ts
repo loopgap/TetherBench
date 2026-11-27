@@ -7,7 +7,10 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const OP = Object.freeze({ INFO: 1, ACQUIRE: 2, RENEW: 3, RELEASE: 4, PINS: 5, CONFIG: 6,
   DAP: 16, BUS: 17, OTA_BEGIN: 32, OTA_WRITE: 33, OTA_FINISH: 34, OTA_ACTIVATE: 35,
-  OTA_STATUS: 36, OTA_ABORT: 37, BOOT_CONFIRM: 38, WIFI_SCAN: 48,
+  OTA_STATUS: 36, OTA_ABORT: 37, BOOT_CONFIRM: 38,
+  TARGET_INFO: 39, TARGET_OTA_BEGIN: 40, TARGET_OTA_WRITE: 41, TARGET_OTA_FINISH: 42,
+  TARGET_OTA_ACTIVATE: 43, TARGET_OTA_STATUS: 44, TARGET_OTA_ABORT: 45,
+  WIFI_SCAN: 48,
   BAND_PREPARE: 49, BAND_COMMIT: 50, BAND_CONFIRM: 51, BAND_CANCEL: 52, BAND_FINALIZE: 53, REBOOT: 63 });
 export const MAX_PAYLOAD = 4096;
 const STATUS = ['OK', 'INVALID', 'UNAUTHORIZED', 'BUSY', 'LEASE', 'UNSUPPORTED', 'IO',
@@ -32,6 +35,17 @@ export interface C5DeviceInfo {
 
 export interface C5OtaState {
   jobId: string; phase: number; received: number; checkpoint: number; total: number; pendingBoot: boolean;
+}
+
+export interface C5TargetOtaState {
+  jobId: string; phase: number; bootResult: number; received: number; checkpoint: number;
+  total: number; rollbackIndex: string; activeVersion: string;
+}
+
+export interface C5TargetInfo {
+  protocolMajor: number; protocolMinor: number; capabilities: number; maxImageLength: number;
+  maxChunk: number; boardId: string; activeVersion: string; bootloaderVersion: string;
+  uniqueId: string; rollbackIndex: string; status: C5TargetOtaState;
 }
 
 export class ProbeError extends Error {
@@ -64,6 +78,37 @@ export function decodeOta(data: Buffer): C5OtaState {
   return { jobId: data.readBigUInt64LE().toString(), phase: data.readUInt32LE(8),
     received: data.readUInt32LE(12), checkpoint: data.readUInt32LE(16),
     total: data.readUInt32LE(20), pendingBoot: Boolean(data.readUInt32LE(24)) };
+}
+function fixedString(data: Buffer, offset: number, length: number): string {
+  const value = data.subarray(offset, offset + length), end = value.indexOf(0);
+  if (end < 0) throw new Error('Invalid target fixed string.');
+  for (let index = end + 1; index < value.length; index++) if (value[index] !== 0) throw new Error('Invalid target fixed string.');
+  return value.subarray(0, end).toString('utf8');
+}
+export function decodeTargetOta(data: Buffer): C5TargetOtaState {
+  if (data.length !== 64) throw new Error('Invalid target OTA state.');
+  const state = { jobId: data.readBigUInt64LE(0).toString(), phase: data[8], bootResult: data[9],
+    received: data.readUInt32LE(12), checkpoint: data.readUInt32LE(16), total: data.readUInt32LE(20),
+    rollbackIndex: data.readBigUInt64LE(24).toString(), activeVersion: fixedString(data, 32, 32) };
+  if (state.phase > 7 || state.bootResult > 3 || data.readUInt16LE(10) !== 0 || state.received > state.total || state.checkpoint > state.received) {
+    throw new Error('Invalid target OTA state.');
+  }
+  if (state.phase === 0 && (state.jobId !== '0' || state.bootResult !== 0 || state.received !== 0 || state.checkpoint !== 0 || state.total !== 0 || state.rollbackIndex !== '0' || state.activeVersion !== '')) {
+    throw new Error('Invalid empty target OTA state.');
+  }
+  if (state.phase !== 0 && state.jobId === '0') throw new Error('Invalid target OTA job ID.');
+  return state;
+}
+export function decodeTargetInfo(data: Buffer): C5TargetInfo {
+  if (data.length !== 180 || data.readUInt16LE(14) !== 0) throw new Error('Invalid target information.');
+  const info = { protocolMajor: data.readUInt16LE(0), protocolMinor: data.readUInt16LE(2), capabilities: data.readUInt32LE(4),
+    maxImageLength: data.readUInt32LE(8), maxChunk: data.readUInt16LE(12), boardId: fixedString(data, 16, 32),
+    activeVersion: fixedString(data, 48, 32), bootloaderVersion: fixedString(data, 80, 16), uniqueId: data.subarray(96, 108).toString('hex'),
+    rollbackIndex: data.readBigUInt64LE(108).toString(), status: decodeTargetOta(data.subarray(116)) };
+  if (info.protocolMajor !== 1 || (info.capabilities & ~0xff) !== 0 || !info.maxImageLength || !info.maxChunk || !info.uniqueId.match(/^(?!0+$)[0-9a-f]{24}$/)) {
+    throw new Error('Invalid target information.');
+  }
+  return info;
 }
 export class C5Client {
   readonly host: string;

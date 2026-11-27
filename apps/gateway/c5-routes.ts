@@ -4,7 +4,8 @@ import { ControlError, decodeC5Ota } from './c5.ts';
 import type { C5OtaState, C5Registry } from './c5.ts';
 import type { C5AdapterType } from './c5.ts';
 import type { C5Adapters } from './c5-adapters.ts';
-import { OP } from '../../firmware/probe-c5/tools/client.ts';
+import { decodeTargetInfo, decodeTargetOta, OP } from '../../firmware/probe-c5/tools/client.ts';
+import type { C5TargetInfo, C5TargetOtaState } from '../../firmware/probe-c5/tools/client.ts';
 
 type JsonReader = (request: IncomingMessage) => Promise<unknown>
 type JsonWriter = (response: ServerResponse, status: number, value: unknown) => void
@@ -29,6 +30,18 @@ function empty(request: IncomingMessage): void {
   if (request.headers['transfer-encoding'] || Number(request.headers['content-length'] ?? 0) !== 0) {
     fail(400, 'unexpected_body', 'This operation has no request body.');
   }
+}
+function targetProtocol(value: unknown): 2 | 3 {
+  if (value === 2 || value === 3 || value === '2' || value === '3') return Number(value) as 2 | 3;
+  if (value === 'uart') return 2;
+  if (value === 'spi') return 3;
+  fail(400, 'invalid_target_protocol', 'Target OTA protocol must be UART or SPI.');
+}
+function targetJob(value: unknown): bigint {
+  if (typeof value !== 'string' || !/^[0-9]{1,20}$/.test(value) || BigInt(value) === 0n || BigInt(value) > 0xffffffffffffffffn) {
+    fail(400, 'invalid_job', 'jobId must be a nonzero unsigned 64-bit decimal string.');
+  }
+  return BigInt(value);
 }
 export async function uploadC5(registry: C5Registry, id: string, sessionId: string, input: AsyncIterable<Buffer> & Pick<Readable, 'destroy'>, declaredSize: number): Promise<C5OtaState> {
   return registry.run(id, async (record) => {
@@ -61,13 +74,73 @@ export async function uploadC5(registry: C5Registry, id: string, sessionId: stri
           const block = Buffer.alloc(12 + count); manifest.copy(block, 0, 0, 8); block.writeUInt32LE(imageOffset, 8); pending.copy(block, 12, 0, count);
           record.ota = decodeC5Ota(await client.rpc(OP.OTA_WRITE, block), total);
           imageOffset += count; received = imageOffset; pending = pending.subarray(count);
-          if (Date.now() - renewed >= 10000) { await client.renew(); renewed = Date.now(); }
+          if (Date.now() - renewed >= 10000) { await registry.renewOwned(record, sessionId); renewed = Date.now(); }
         }
       }
       if (!manifest || inputBytes !== declaredSize || imageOffset !== total) fail(400, 'ota_truncated', 'OTA upload was truncated.');
       const completedManifest = manifest;
       await client.rpc(OP.OTA_FINISH, completedManifest.subarray(0, 8));
       record.ota = decodeC5Ota(await client.rpc(OP.OTA_STATUS), total); return record.ota;
+    } finally { clearTimeout(timer); }
+  });
+}
+
+export async function uploadTarget(registry: C5Registry, id: string, sessionId: string, protocol: 2 | 3,
+  input: AsyncIterable<Buffer> & Pick<Readable, 'destroy'>, declaredSize: number): Promise<C5TargetOtaState> {
+  return registry.run(id, async (record) => {
+    registry.owner(record, sessionId);
+    if (record.adapter) fail(409, 'adapter_active', 'Stop the active adapter before updating the target.');
+    const client = registry.client(record);
+    const info: C5TargetInfo = decodeTargetInfo(await client.rpc(OP.TARGET_INFO, Buffer.from([protocol])));
+    if ((info.capabilities & 0xff) !== 0xff) fail(422, 'target_unsupported', 'The target does not provide all required OTA capabilities.');
+    if (info.maxChunk > 983) fail(502, 'target_protocol', 'The target reports an unsupported write chunk size.');
+    let pending = Buffer.alloc(0), manifest: Buffer | null = null, initialState: C5TargetOtaState | null = null, total = 0, inputBytes = 0, imageOffset = 0, received = 0, checkpoint = 0, resumable = false, renewed = Date.now(), targetJobId = 0n;
+    const timer = setTimeout(() => input.destroy(new Error('Target OTA upload exceeded three minutes.')), 180000); timer.unref();
+    try {
+      for await (const chunk of uploadChunks(input)) {
+        if (chunk.length > 0) { inputBytes += chunk.length; if (inputBytes > declaredSize) fail(413, 'target_ota_size', 'Target OTA upload exceeds declared length.'); }
+        pending = Buffer.concat([pending, chunk]);
+        if (!manifest && pending.length >= 184) {
+          manifest = Buffer.from(pending.subarray(0, 184)); pending = pending.subarray(184);
+          targetJobId = manifest.readBigUInt64LE(0); total = manifest.readUInt32LE(12);
+          if (!targetJobId || manifest[8] !== 1 || manifest[9] !== 0 || manifest.readUInt16LE(10) !== 0 || total < 1 || total > info.maxImageLength || declaredSize !== 184 + total) {
+            fail(400, 'target_ota_manifest', 'Target manifest or upload length is invalid.');
+          }
+          const boardField = manifest.subarray(80, 112), boardEnd = boardField.indexOf(0);
+          if (boardEnd < 0 || boardField.subarray(boardEnd + 1).some((value) => value !== 0)) {
+            fail(400, 'target_ota_manifest', 'Target manifest board ID is not zero padded.');
+          }
+          if (boardField.subarray(0, boardEnd).toString('utf8') !== info.boardId) fail(409, 'target_board_mismatch', 'Target manifest board ID does not match the connected target.');
+          const begin = Buffer.alloc(185); begin[0] = protocol; manifest.copy(begin, 1);
+          const state = decodeTargetOta(await client.rpc(OP.TARGET_OTA_BEGIN, begin));
+          if (state.jobId !== targetJobId.toString() || state.total !== total || ![1, 2, 4, 5, 6].includes(state.phase)) fail(502, 'target_ota_state', 'Target returned an invalid resume state.');
+          initialState = state;
+          resumable = state.phase === 1;
+          received = state.received; checkpoint = state.checkpoint;
+        }
+        while (manifest && pending.length) {
+          if (!resumable) { pending = Buffer.alloc(0); break; }
+          if (imageOffset < checkpoint) {
+            const skip = Math.min(checkpoint - imageOffset, pending.length); imageOffset += skip; pending = pending.subarray(skip); continue;
+          }
+          if (pending.length < info.maxChunk && inputBytes < declaredSize) break;
+          const replaying = imageOffset < received;
+          const count = Math.min(info.maxChunk, pending.length, total - imageOffset, replaying ? received - imageOffset : total - imageOffset);
+          if (!count) break;
+          const block = Buffer.alloc(12 + count); block.writeBigUInt64LE(targetJobId, 0); block.writeUInt32LE(imageOffset, 8); pending.copy(block, 12, 0, count);
+          const state = decodeTargetOta(await client.rpc(OP.TARGET_OTA_WRITE, block));
+          const expectedReceived = replaying ? received : imageOffset + count;
+          if (state.jobId !== targetJobId.toString() || state.phase !== 1 || state.total !== total || state.received !== expectedReceived || state.checkpoint < checkpoint) fail(502, 'target_ota_state', 'Target returned an invalid write checkpoint.');
+          imageOffset += count; received = state.received; checkpoint = state.checkpoint; pending = pending.subarray(count);
+          if (Date.now() - renewed >= 10000) { await registry.renewOwned(record, sessionId); renewed = Date.now(); }
+        }
+      }
+      if (!manifest || inputBytes !== declaredSize || (resumable && imageOffset !== total) || pending.length) fail(400, 'target_ota_truncated', 'Target OTA upload was truncated.');
+      if (!initialState) fail(502, 'target_ota_state', 'Target did not provide an update state.');
+      if (!resumable) return initialState;
+      const job = Buffer.alloc(8); job.writeBigUInt64LE(targetJobId);
+      decodeTargetOta(await client.rpc(OP.TARGET_OTA_FINISH, job));
+      return decodeTargetOta(await client.rpc(OP.TARGET_OTA_STATUS));
     } finally { clearTimeout(timer); }
   });
 }
@@ -111,11 +184,34 @@ export async function handleC5({ request, response, pathname, registry, adapters
     request.setTimeout(15000, () => request.destroy(new Error('OTA input stalled.')));
     json(response, 200, await uploadC5(registry, id, sessionId, request, length)); return true;
   }
+  if (request.method === 'POST' && action === 'target-ota') {
+    const length = Number(request.headers['content-length']);
+    const sessionId = request.headers['x-tetherbench-session'];
+    if (typeof sessionId !== 'string' || !sessionId) fail(400, 'invalid_session', 'A session ID is required for target OTA.');
+    if (request.headers['content-type'] !== 'application/octet-stream') fail(415, 'unsupported_media_type', 'Upload the 184-byte target manifest followed by image bytes.');
+    if (!Number.isSafeInteger(length) || length < 185 || length > 184 + 0x1e0000) fail(413, 'target_ota_size', 'Target OTA requires an explicit bounded Content-Length.');
+    const protocol = targetProtocol(request.headers['x-tetherbench-protocol']);
+    request.setTimeout(15000, () => request.destroy(new Error('Target OTA input stalled.')));
+    json(response, 200, await uploadTarget(registry, id, sessionId, protocol, request, length)); return true;
+  }
   if (request.method !== 'POST' && request.method !== 'PUT') fail(404, 'not_found', 'C5 endpoint was not found.');
   const value = await readJson(request);
   if (!isRecord(value) || typeof value.sessionId !== 'string') fail(400, 'invalid_session', 'A sessionId is required.');
   const body = value;
   const sessionId = body.sessionId as string;
+  if (request.method === 'POST' && ['target-ota/info', 'target-ota/status', 'target-ota/activate', 'target-ota/abort'].includes(action)) {
+    const protocol = body.protocol === undefined ? undefined : targetProtocol(body.protocol);
+    if (action === 'target-ota/info') {
+      if (protocol === undefined) fail(400, 'invalid_target_protocol', 'Target information requires UART or SPI.');
+      json(response, 200, decodeTargetInfo(await registry.command(id, sessionId, OP.TARGET_INFO, Buffer.from([protocol])))); return true;
+    }
+    if (action === 'target-ota/status') {
+      json(response, 200, decodeTargetOta(await registry.command(id, sessionId, OP.TARGET_OTA_STATUS))); return true;
+    }
+    const job = Buffer.alloc(8); job.writeBigUInt64LE(targetJob(body.jobId));
+    const op = action.endsWith('activate') ? OP.TARGET_OTA_ACTIVATE : OP.TARGET_OTA_ABORT;
+    json(response, 200, decodeTargetOta(await registry.command(id, sessionId, op, job))); return true;
+  }
   if (request.method === 'POST' && action === 'wifi/negotiate') {
     const peerIdValue = body.peerId, requestedPeerSessionId = body.peerSessionId;
     if (typeof peerIdValue !== 'string' || (requestedPeerSessionId !== undefined && typeof requestedPeerSessionId !== 'string')) {
@@ -147,9 +243,16 @@ export async function handleC5({ request, response, pathname, registry, adapters
     op = OP.PINS;
   } else if (request.method === 'POST' && action === 'bus') {
     const data = hex(body.data ?? '', 1024);
-    payload = Buffer.alloc(12 + data.length); payload[0] = integer(body.protocol, 2, 4, 'protocol');
-    payload.writeUInt16LE(integer(body.address ?? 0, 0, 127, 'address'), 2); payload.writeUInt16LE(data.length, 4);
-    payload.writeUInt16LE(integer(body.receive ?? 0, 0, 1024, 'receive'), 6);
+    const protocol = integer(body.protocol, 2, 4, 'protocol');
+    const address = integer(body.address ?? 0, 0, 127, 'address');
+    const receive = integer(body.receive ?? 0, 0, 1024, 'receive');
+    if ((!data.length && !receive) || (protocol === 4 ? address < 8 || address > 0x77 : address !== 0) ||
+        (protocol === 3 && data.length && receive && data.length !== receive)) {
+      fail(400, 'invalid_bus_transaction', 'Bus address or transfer lengths are invalid for the selected protocol.');
+    }
+    payload = Buffer.alloc(12 + data.length); payload[0] = protocol;
+    payload.writeUInt16LE(address, 2); payload.writeUInt16LE(data.length, 4);
+    payload.writeUInt16LE(receive, 6);
     payload.writeUInt16LE(integer(body.timeoutMs ?? 50, 1, 100, 'timeoutMs'), 8); data.copy(payload, 12); op = OP.BUS;
   } else if (request.method === 'POST' && action === 'dap') { payload = hex(body.data, 1024); op = OP.DAP; }
   else if (request.method === 'POST' && action === 'wifi/scan') { payload = Buffer.alloc(0); op = OP.WIFI_SCAN; }

@@ -74,6 +74,10 @@ opcode 17 BUS：12 字节头 protocol u8、flags u8=0、address u16、tx_length 
 
 UART 可返回少于请求的接收字节；发送超时释放 UART。UART/SPI address=0。SPI 同时收发要求 tx_length=rx_length，单次 CS 事务。I2C 地址 0x08..0x77，先写后读使用重复起始。UART/SPI 检查理论传输时间；实际等待受 FreeRTOS tick 和驱动调度影响。
 
+BUS 是经 Wi-Fi RPC 执行的有界原始字节事务，不提供 UART 持续字节流、异步推送或无限缓冲。UART RX 可短读；调用方须依据本次返回长度处理数据，连接结果不明确时先读取设备/目标状态，不能自动重放事务。SPI 每个请求对应一次 CS 事务；UART 为 8N1，SPI 仅 mode 0。以上速率是配置上限，不代表无线吞吐或 GPIO 实测值。
+
+协议 ID 1..4（SWD、UART、SPI、I2C）和 opcode 16..17 固定兼容。新增总线协议使用新 ID，不重解释现有编号；新增项必须同时为引脚角色、合法时钟、最大事务、超时、短读/返回长度、资源互斥与租约释放、能力声明及错误/恢复语义定义行为，并更新本机 Gateway、控制台、客户端和回归测试。当前 `INFO.capabilities` 明确列出现有协议。持续流传输需单独版本化，定义双向帧、流控/背压、连接恢复与租约取消，不能复用 BUS 轮询冒充透明串流。
+
 开始更新/切频前必须释放所有协议；更新和切频期间拒绝 DAP/BUS。
 
 ## 签名双槽 OTA

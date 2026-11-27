@@ -550,10 +550,9 @@ export class C5Registry {
     record.connected = true; record.error = null;
   }
   async renewBandLease(record: C5DeviceRecord): Promise<void> {
-    await this.probe(record, () => this.client(record).renew(60000));
     const session = record.session;
     if (!session) reject(409, 'session_expired', 'C5 session is missing or expired.');
-    session.deadline = this.now() + 60000;
+    await this.renewOwned(record, session.id);
   }
   async refresh(): Promise<C5DeviceSummary[]> {
     if (this.closed) return this.list();
@@ -602,6 +601,12 @@ export class C5Registry {
     }
     return session;
   }
+  async renewOwned(record: C5DeviceRecord, sessionId: string): Promise<C5Session> {
+    const session = this.owner(record, sessionId);
+    await this.probe(record, () => this.client(record).renew(60000));
+    session.deadline = this.now() + 60000;
+    return { ...session };
+  }
   async acquire(id: string): Promise<C5Session> {
     return this.run(id, async (record) => {
       if (record.session) reject(409, 'session_busy', 'C5 already has an active session.');
@@ -612,10 +617,7 @@ export class C5Registry {
   }
   session(id: string, sessionId: string): C5Session { const record = this.record(id); return { ...this.owner(record, sessionId) }; }
   async renew(id: string, sessionId: string): Promise<C5Session> {
-    return this.run(id, async (record) => {
-      const session = this.owner(record, sessionId); await this.client(record).renew();
-      session.deadline = this.now() + 60000; return { ...session };
-    });
+    return this.run(id, (record) => this.renewOwned(record, sessionId));
   }
   async release(id: string, sessionId: string): Promise<{ released: true }> {
     return this.run(id, async (record) => {

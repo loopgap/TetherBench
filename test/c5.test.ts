@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { C5Client, OP, ProbeError, encodeFrame, decodeResponse } from '../firmware/probe-c5/tools/client.ts';
 import { C5Registry, verifyC5CertificateFingerprint } from '../apps/gateway/c5.ts';
 import type { C5ClientOptions, C5Profile } from '../apps/gateway/c5.ts';
-import { uploadC5 } from '../apps/gateway/c5-routes.ts';
+import { uploadC5, uploadTarget } from '../apps/gateway/c5-routes.ts';
 import { createGatewayServer } from '../apps/gateway/server.ts';
 
 function loopbackUrl(server: Server): string {
@@ -21,23 +21,54 @@ function loopbackUrl(server: Server): string {
 
 function fixtures() {
   let clock = 1000; const clients: Array<Record<string, any>> = [];
+  const targetInfo = Buffer.alloc(180); targetInfo.writeUInt16LE(1, 0); targetInfo.writeUInt32LE(0xff, 4); targetInfo.writeUInt32LE(0x100000, 8);
+  targetInfo.writeUInt16LE(983, 12); Buffer.from('test-mcu').copy(targetInfo, 16); Buffer.from('boot-1').copy(targetInfo, 80);
+  for (let index = 0; index < 12; index++) targetInfo[96 + index] = index + 1;
   const profiles: C5Profile[] = [1, 2].map((number) => ({ id: 'probe-' + number, name: 'C5 ' + number, host: '192.168.137.' + number,
     fingerprint: String(number).repeat(64), token: String(number).repeat(64), certificate: Buffer.from('cert-' + number) }));
   const registry = new C5Registry(profiles, {
     now: () => clock, discovery: async () => [],
     clientFactory(options: C5ClientOptions) {
-      const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, closed: false, malformedOta: false,
+      const client: Record<string, any> = { ...options, lease: 0n, pins: Buffer.alloc(48), received: 0, phase: 0, job: 0n, targetReceived: 0, targetCheckpoint: 0, targetTotal: 0, targetPhase: 0, targetJob: 0n, targetProtocol: 0, targetImage: Buffer.alloc(0), targetWriteOffsets: [], targetOverreport: false, closed: false, malformedOta: false,
         close() { this.closed = true; }, async info() { if (this.closed) throw new Error('client is closed'); if (this.fail) throw new Error('connection lost'); return { id: 'c5-00000000000' + options.id.slice(-1), board: 'esp32c5-n4', pendingBoot: Boolean(this.pendingBoot) }; },
-        async acquire() { this.lease = 42n; }, async renew() { this.renewed = true; }, async release() { this.lease = 0n; },
+        async acquire() { this.lease = 42n; }, async renew(ttl = 30000) { this.renewed = true; this.renewTtl = ttl; }, async release() { this.lease = 0n; },
         async rpc(op: number, data: Buffer = Buffer.alloc(0)) {
           if (op === OP.PINS) { data.copy(this.pins, (data[0] - 1) * 12); return Buffer.alloc(0); }
           if (op === OP.CONFIG) return this.pins;
-          if (op === OP.BUS) return data.subarray(12);
+          if (op === OP.BUS) { this.lastBus = Buffer.from(data); return Buffer.alloc(data.readUInt16LE(6), 0x5a); }
           if (op === OP.OTA_BEGIN) { this.job = data.readBigUInt64LE(); this.total = data.readUInt32LE(12); this.phase = 1; }
           if (op === OP.OTA_WRITE) { assert.equal(data.readUInt32LE(8), this.received); this.received += data.length - 12; }
           if (op === OP.OTA_FINISH) { assert.equal(this.received, this.total); this.phase = 2; return Buffer.alloc(0); }
           if (op === OP.OTA_ABORT) { this.job = 0n; this.received = 0; this.total = 0; this.phase = 0; return Buffer.alloc(0); }
           if (op === OP.OTA_ACTIVATE) { this.job = data.readBigUInt64LE(); this.phase = 3; return Buffer.alloc(0); }
+          if (op === OP.TARGET_INFO) return targetInfo;
+          if (op === OP.TARGET_OTA_BEGIN) {
+            this.targetProtocol = data[0];
+            const job = data.readBigUInt64LE(1), total = data.readUInt32LE(13);
+            if (this.targetJob !== job) {
+              this.targetJob = job; this.targetTotal = total; this.targetReceived = 0; this.targetCheckpoint = 0;
+              this.targetImage = Buffer.alloc(total); this.targetPhase = 1;
+            }
+          }
+          if (op === OP.TARGET_OTA_WRITE) {
+            assert.equal(data.readBigUInt64LE(), this.targetJob);
+            const offset = data.readUInt32LE(8), bytes = data.subarray(12); this.targetWriteOffsets.push(offset);
+            if (offset < this.targetReceived) {
+              assert.ok(offset + bytes.length <= this.targetReceived);
+              assert.ok(this.targetImage.subarray(offset, offset + bytes.length).equals(bytes));
+            } else {
+              assert.equal(offset, this.targetReceived); bytes.copy(this.targetImage, offset);
+              this.targetReceived += bytes.length; this.targetCheckpoint = this.targetReceived;
+            }
+          }
+          if (op === OP.TARGET_OTA_FINISH) { assert.equal(data.readBigUInt64LE(), this.targetJob); assert.equal(this.targetReceived, this.targetTotal); this.targetPhase = 2; }
+          if (op === OP.TARGET_OTA_ACTIVATE) { this.targetPhase = 3; }
+          if (op === OP.TARGET_OTA_ABORT) { this.targetJob = 0n; this.targetReceived = 0; this.targetTotal = 0; this.targetPhase = 0; }
+          if (op === OP.TARGET_OTA_STATUS || op === OP.TARGET_OTA_BEGIN || op === OP.TARGET_OTA_WRITE || op === OP.TARGET_OTA_FINISH || op === OP.TARGET_OTA_ACTIVATE || op === OP.TARGET_OTA_ABORT) {
+            const state = Buffer.alloc(64); state.writeBigUInt64LE(this.targetJob, 0); state[8] = this.targetPhase;
+            const reportedReceived = this.targetOverreport && op === OP.TARGET_OTA_WRITE ? this.targetReceived + 1 : this.targetReceived;
+            state.writeUInt32LE(reportedReceived, 12); state.writeUInt32LE(this.targetCheckpoint, 16); state.writeUInt32LE(this.targetTotal, 20); Buffer.from('v1').copy(state, 32); return state;
+          }
           if (new Set<number>([OP.OTA_BEGIN, OP.OTA_WRITE, OP.OTA_STATUS]).has(op)) {
             const state = Buffer.alloc(28); state.writeBigUInt64LE(this.job); state.writeUInt32LE(this.phase, 8);
             state.writeUInt32LE(this.malformedOta ? (this.total ?? 0) + 1 : this.received, 12);
@@ -211,7 +242,15 @@ test('Gateway routes encode bounded GPIO and bus transactions and enforce owners
     assert.equal((await api('/probe-1/pins', 'PUT', { sessionId: session.id, protocol: 1, hz: 1000000, pins: [2, 3] })).status, 200);
     assert.equal(clients[0].pins.readInt8(10), -1);
     const reply = await api('/probe-1/bus', 'POST', { sessionId: session.id, protocol: 2, data: 'aabb', receive: 2 });
-    assert.equal(reply.body.data, 'aabb');
+    assert.equal(reply.body.data, '5a5a');
+    assert.deepEqual([...clients[0].lastBus.subarray(0, 10)], [2, 0, 0, 0, 2, 0, 2, 0, 50, 0]);
+    assert.equal(clients[0].lastBus.subarray(12).toString('hex'), 'aabb');
+    const spi = await api('/probe-1/bus', 'POST', { sessionId: session.id, protocol: 3, data: '010203', receive: 3 });
+    assert.equal(spi.status, 200); assert.equal(spi.body.data, '5a5a5a');
+    assert.equal(clients[0].lastBus[0], 3); assert.equal(clients[0].lastBus.readUInt16LE(4), 3); assert.equal(clients[0].lastBus.readUInt16LE(6), 3);
+    assert.equal((await api('/probe-1/bus', 'POST', { sessionId: session.id, protocol: 3, data: '010203', receive: 2 })).status, 400);
+    assert.equal((await api('/probe-1/bus', 'POST', { sessionId: session.id, protocol: 4, address: 1, data: '01' })).status, 400);
+    assert.equal((await api('/probe-1/bus', 'POST', { sessionId: session.id, protocol: 2 })).status, 400);
     assert.equal((await api('/probe-1/bus', 'POST', { sessionId: session.id, protocol: 2, data: 'abc' })).status, 400);
     assert.equal((await api('/probe-2/dap', 'POST', { sessionId: session.id, data: '00f0' })).status, 409);
     const listing = (await api('')).body; assert.equal(listing.devices.length, 2);
@@ -232,6 +271,99 @@ test('OTA upload streams bounded blocks and resumes from the device offset', asy
     await assert.rejects(uploadC5(registry, 'probe-1', 'wrong-owner', Readable.from([]), wire.length), { code: 'session_expired' });
     await assert.rejects(uploadC5(registry, 'probe-1', session.id, Readable.from([wire.subarray(0, 100)]), wire.length), { code: 'ota_truncated' });
   } finally { registry.close(); }
+});
+
+test('C5 lease renewal extends the Gateway session by the same interval', async () => {
+  const { registry, clients, advance } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    advance(5000);
+    const renewed = await registry.renew('probe-1', session.id);
+    assert.equal(clients[0].renewTtl, 60000);
+    assert.equal(renewed.deadline, 66000);
+  } finally { registry.close(); }
+});
+
+test('target OTA upload validates target capabilities and streams resumable UART blocks', async () => {
+  const { registry, clients } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const manifest = Buffer.alloc(184), image = Buffer.alloc(2500, 0x5a);
+    manifest.writeBigUInt64LE(77n, 0); manifest[8] = 1; manifest.writeUInt32LE(image.length, 12); Buffer.from('test-mcu').copy(manifest, 80);
+    const wire = Buffer.concat([manifest, image]); const chunks = [];
+    for (let offset = 0; offset < wire.length; offset += 311) chunks.push(wire.subarray(offset, offset + 311));
+    const state = await uploadTarget(registry, 'probe-1', session.id, 2, Readable.from(chunks), wire.length);
+    assert.equal(state.jobId, '77'); assert.equal(state.phase, 2); assert.equal(state.received, image.length);
+    assert.equal(clients[0].targetProtocol, 2); assert.equal(clients[0].targetReceived, image.length);
+  } finally { registry.close(); }
+});
+
+test('target OTA rejects a manifest for a different board before BEGIN', async () => {
+  const { registry } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const manifest = Buffer.alloc(184), image = Buffer.alloc(8);
+    manifest.writeBigUInt64LE(79n, 0); manifest[8] = 1; manifest.writeUInt32LE(image.length, 12); Buffer.from('other-mcu').copy(manifest, 80);
+    await assert.rejects(uploadTarget(registry, 'probe-1', session.id, 2, Readable.from([Buffer.concat([manifest, image])]), manifest.length + image.length), { code: 'target_board_mismatch' });
+  } finally { registry.close(); }
+});
+
+test('target OTA replays bytes after the durable checkpoint and resumes safely', async () => {
+  const { registry, clients } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const image = Buffer.alloc(2500, 0x5a), manifest = Buffer.alloc(184);
+    manifest.writeBigUInt64LE(77n); manifest[8] = 1; manifest.writeUInt32LE(image.length, 12); Buffer.from('test-mcu').copy(manifest, 80);
+    const client = clients[0]; client.targetJob = 77n; client.targetTotal = image.length; client.targetReceived = 1600; client.targetCheckpoint = 1000;
+    client.targetPhase = 1; client.targetImage = Buffer.from(image);
+    const wire = Buffer.concat([manifest, image]), chunks = [];
+    for (let offset = 0; offset < wire.length; offset += 311) chunks.push(wire.subarray(offset, offset + 311));
+    const state = await uploadTarget(registry, 'probe-1', session.id, 2, Readable.from(chunks), wire.length);
+    assert.equal(state.received, image.length);
+    assert.equal(client.targetImage.equals(image), true);
+    assert.equal(client.targetWriteOffsets[0], 1000);
+  } finally { registry.close(); }
+});
+
+test('target OTA accepts an already verified job without rewriting its image', async () => {
+  const { registry, clients } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const image = Buffer.alloc(64, 0x2a), manifest = Buffer.alloc(184);
+    manifest.writeBigUInt64LE(81n); manifest[8] = 1; manifest.writeUInt32LE(image.length, 12); Buffer.from('test-mcu').copy(manifest, 80);
+    const client = clients[0]; client.targetJob = 81n; client.targetTotal = image.length; client.targetReceived = image.length;
+    client.targetCheckpoint = image.length; client.targetPhase = 2; client.targetImage = Buffer.from(image);
+    const state = await uploadTarget(registry, 'probe-1', session.id, 2, Readable.from([Buffer.concat([manifest, image])]), manifest.length + image.length);
+    assert.equal(state.phase, 2); assert.deepEqual(client.targetWriteOffsets, []);
+  } finally { registry.close(); }
+});
+
+test('target OTA rejects a write acknowledgment beyond the requested range', async () => {
+  const { registry, clients } = fixtures();
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const manifest = Buffer.alloc(184), image = Buffer.alloc(2500, 0x5a);
+    manifest.writeBigUInt64LE(82n); manifest[8] = 1; manifest.writeUInt32LE(image.length, 12); Buffer.from('test-mcu').copy(manifest, 80);
+    clients[0].targetOverreport = true;
+    await assert.rejects(uploadTarget(registry, 'probe-1', session.id, 2, Readable.from([Buffer.concat([manifest, image])]), manifest.length + image.length), { code: 'target_ota_state' });
+  } finally { registry.close(); }
+});
+
+test('Gateway exposes target OTA upload and status routes with protocol selection', async () => {
+  const { registry } = fixtures(); const server = createGatewayServer({ c5Registry: registry });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = loopbackUrl(server);
+  try {
+    await registry.refresh(); const session = await registry.acquire('probe-1');
+    const manifest = Buffer.alloc(184), image = Buffer.alloc(64, 0x2a);
+    manifest.writeBigUInt64LE(78n, 0); manifest[8] = 1; manifest.writeUInt32LE(image.length, 12); Buffer.from('test-mcu').copy(manifest, 80);
+    const response = await fetch(base + '/api/v1/c5/probe-1/target-ota', { method: 'POST', headers: {
+      'content-type': 'application/octet-stream', 'content-length': String(manifest.length + image.length),
+      'x-tetherbench-session': session.id, 'x-tetherbench-protocol': 'uart',
+    }, body: Buffer.concat([manifest, image]) });
+    assert.equal(response.status, 200); assert.equal((await response.json() as { phase: number }).phase, 2);
+    const status = await fetch(base + '/api/v1/c5/probe-1/target-ota/status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: session.id }) });
+    assert.equal(status.status, 200); assert.equal((await status.json() as { total: number }).total, image.length);
+  } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); registry.close(); }
 });
 
 test('OTA upload rejects an inconsistent checkpoint from the C5', async () => {

@@ -9,6 +9,7 @@
 - UDP 4440 只提供定位信息，设备身份由本机预置证书确认。
 - C5 可配置为 STA 或独立 SoftAP；AP 与 STA 不同时运行。AP 模式凭据保存在本机 `.local/ap-network.json`，并以 `INFO.wifi.ap` 标识；单射频一次只有一个频段/信道。AP/STA 配对的 Gateway 自动切频协商尚未验收，当前 Gateway 仅接受 STA 角色。
 - 租约统一拥有目标资源，到期后释放。负载上限 4096 字节，DAP 上限 1024 字节。
+- 已定义的 UART/SPI/I²C 无线透传是有界 BUS 单次事务（每次收发最多 1024 字节、超时 1..100 ms），不是持续字节流；扩展协议时保留 ID 1..4，新增 ID 必须同时定义引脚角色、能力声明、事务边界、超时和复位释放行为，并同步固件、Gateway、控制台和回归检查。
 - 网络 CMSIS-DAP 不等于 USB 枚举。OpenOCD、虚拟 USB、CDC 等适配需独立实现和互操作证据。
 - C5 自身支持签名双槽 OTA；外部 MCU OTA 使用 [Target MCU OTA v1](target-mcu-ota.md)，C5 已实现 UART/SPI 转发、manifest 预检、持久资源锁和恢复状态查询。目标 MCU bootloader、独立验签与回滚能力以及 UART/SPI 真机闭环仍未验证，不能据此宣称目标 MCU OTA 已可用。
 
