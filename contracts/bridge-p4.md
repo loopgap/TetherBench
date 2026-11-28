@@ -43,6 +43,15 @@ and C5 target pins must come from a named board profile after the P4 and C5 boar
 revisions are identified. Until then the bridge leaves external transport pins
 disabled and must fail closed.
 
+The current host observation identifies COM10 as VID:PID `303A:4001` running a
+factory-test image that reports `board=WT9932P4-TINY`, `pins=39`, and
+`gpio_window=CLOSED`. This is provisional board identification only. It does not
+identify the USB speed, expose a schematic GPIO map, or prove that the image is
+the TetherBench bridge. COM9 currently identifies as VID:PID `303A:1001` and
+reports `factory_test_dut`; it is not bridge evidence either. The captured
+read-only evidence is kept in
+[`firmware/bridge-p4/docs/validation.md`](../firmware/bridge-p4/docs/validation.md).
+
 The P4 route still needs independent evidence for USB enumeration, High-Speed
 throughput, CMSIS-DAP v2 interoperability, C5 transport, SWD transactions,
 target-MCU OTA, interruption recovery, and power-loss recovery.

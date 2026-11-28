@@ -1,0 +1,41 @@
+# P4 bridge validation record
+
+This record keeps P4 + C5 evidence separate from the pure C5 wireless route.
+The two routes are independent acceptance paths for the same host-side Gateway.
+
+## 2026-11-28 local observation
+
+The Windows host enumerated these serial interfaces:
+
+| Port | VID:PID | Read-only observation | Interpretation |
+|---|---|---|---|
+| COM9 | `303A:1001` | `factory_test_dut`; repeated TinyUSB CDC flush warnings | Existing factory-test image; no bridge frame evidence |
+| COM10 | `303A:4001` | `WTFT/1 0 INFO board=WT9932P4-TINY pins=39 gpio_window=CLOSED` | Provisional board identity only |
+
+The probe opened each port with DTR and RTS disabled, read for five seconds, sent
+no bytes, and closed both handles. This confirms that both interfaces are present
+and producing logs. It does not establish USB speed, USB descriptors, CMSIS-DAP
+interoperability, P4-to-C5 wiring, or target SWD access. Port numbers are not a
+hardware contract.
+
+## Firmware build evidence
+
+`tools/build.ps1 -ExtraComponentDirs C:\Temp\tb-p4-components` completed with
+ESP-IDF `D:\esp-idf\v6.1.1\esp-idf` and produced the ESP32-P4 application and
+bootloader images. The generated `build/`, `sdkconfig`, and local component lock
+were removed after the check. This is a source/linkage check, not a flash or HIL
+result.
+
+## Required gates before selecting pins or flashing
+
+1. Identify the exact WT9932P4-TINY board revision and schematic, then record
+   reserved USB, flash, PSRAM, boot, and factory-test GPIOs in a named board
+   profile.
+2. Select a high-speed C5 transport only from that profile and the C5 board
+   revision. Record signal direction, voltage, ground, maximum clock, and a
+   recovery state before enabling the pins in firmware.
+3. Flash this bridge image only to the intended P4 device, capture USB
+   descriptors on COM9/COM10, and verify the fixed-frame PING response.
+4. Add independent throughput, disconnect/reconnect, C5 transport, CMSIS-DAP v2,
+   SWD, target-OTA, and power-loss recovery evidence. A pure C5 Wi-Fi result or
+   the factory-test logs cannot satisfy these gates.
