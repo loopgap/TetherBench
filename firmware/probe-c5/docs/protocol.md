@@ -163,7 +163,7 @@ opcode 44 兼容两种查询形式：空负载只读取当前持久化更新任�
 
 ## Wi-Fi 和协商切频
 
-C5 使用双频 AUTO，协议能力含 802.11ax，但只有一条射频链路，同一时刻只工作于一个频段和信道。默认 STA 从本机配置连接热点，得到 IP 后验证 HE20，否则断开并按 1..30 秒退避。`provision.py --ap` 配置独立 SoftAP，不启用 STA 回程；其 SSID 和随机强密码保存在忽略提交的 `.local/ap-network.json`，可用同一个文件把另一台 C5 配成 STA。AP 启动信道为 6，可按准备好的事务切到允许信道；关联客户端收到信道切换公告。AP 会拒绝不支持 802.11ax 的客户端；关联列表检查不等于逐帧 PHY 证明。
+C5 使用双频 AUTO，协议能力含 802.11ax，但只有一条射频链路，同一时刻只工作于一个频段和信道。默认 STA 从本机配置连接热点，在 WIFI_EVENT_STA_CONNECTED 时检查协商 PHY；只有 HE20 才继续等待 IP，非 HE20 或 PHY 查询失败时立即断开。HE20 关联后 10 秒仍未获得 IP 时断开。重连采用 1、2、4、8、16、30 秒封顶退避；每个到期点只发起一次连接请求，下一次退避由断开事件安排。SDK 返回 ESP_ERR_WIFI_CONN 时等待当前连接尝试的驱动事件，不重复发起请求；其他同步错误按退避重试。成功取得 IP 后重置退避。`provision.py --ap` 配置独立 SoftAP，不启用 STA 回程；其 SSID 和随机强密码保存在忽略提交的 `.local/ap-network.json`，可用同一个文件把另一台 C5 配成 STA。AP 启动信道为 6，可按准备好的事务切到允许信道；关联客户端收到信道切换公告。AP 会拒绝不支持 802.11ax 的客户端；关联列表检查不等于逐帧 PHY 证明。
 
 INFO 的 `wifi.ap` 标明独立 AP 角色。STA 的 `wifi.ip` 是上行地址，`wifi.rssi` 和 `wifi.phy` 表示关联 AP 的链路；AP 的 `wifi.ip` 是本机 AP 地址，`wifi.rssi` 是关联客户端中最弱的读数，`wifi.phy=-1` 且 `wifi.he20=null`，因为设备自身没有 STA 上行链路。AP 模式要求至少一个关联且都支持 11ax 的客户端，才允许 BAND_CONFIRM。`wireless-console` 分支的 Gateway 自动协商当前只接受 STA 角色；该分支目前仍按 `wifi.phy===5` 判断 HE20，须在本分支修复后同步改用 `wifi.he20===true`，AP/STA 配对协商尚未完成端到端验收。
 

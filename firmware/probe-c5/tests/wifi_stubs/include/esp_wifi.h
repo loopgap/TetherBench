@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define ESP_ERR_WIFI_CONN (-2)
+
 typedef enum
 {
+    WIFI_PHY_MODE_HT20 = 3,
     WIFI_PHY_MODE_HE20 = 6
 } wifi_phy_mode_t;
 typedef int wifi_second_chan_t;

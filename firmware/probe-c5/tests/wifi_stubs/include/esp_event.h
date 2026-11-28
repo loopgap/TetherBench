@@ -14,6 +14,7 @@ extern const int ip_event_base;
 #define WIFI_EVENT_SCAN_DONE 1
 #define WIFI_EVENT_STA_DISCONNECTED 2
 #define WIFI_EVENT_AP_STACONNECTED 3
+#define WIFI_EVENT_STA_CONNECTED 4
 #define IP_EVENT_STA_GOT_IP 4
 
 typedef struct

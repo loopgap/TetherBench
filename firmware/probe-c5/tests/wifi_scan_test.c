@@ -14,6 +14,8 @@ struct esp_netif
     int unused;
 };
 static struct esp_netif test_netif;
+static unsigned disconnect_calls, connect_calls;
+static esp_err_t connect_result;
 
 esp_err_t esp_netif_init(void)
 {
@@ -107,7 +109,8 @@ esp_err_t esp_wifi_set_ps(wifi_ps_type_t type)
 }
 esp_err_t esp_wifi_connect(void)
 {
-    return ESP_OK;
+    connect_calls++;
+    return connect_result;
 }
 esp_err_t esp_wifi_get_channel(uint8_t *primary, wifi_second_chan_t *secondary)
 {
@@ -136,11 +139,15 @@ esp_err_t esp_wifi_get_config(wifi_interface_t interface, wifi_config_t *config)
 static bool ap_list_allocated;
 static unsigned scan_starts, scan_stops, record_reads, list_clears;
 static esp_err_t start_result, stop_result, records_result, clear_result;
+static esp_err_t phymode_result;
+static wifi_phy_mode_t phymode_value;
 static uint32_t event_status;
+static uint64_t timer_us;
 
 static void reset_test_state(void)
 {
-    ready = scanning = scan_done = scan_failed = scanned = false;
+    ready = scanning = scan_done = scan_failed = scanned = associated = false;
+    associated_at = 0;
     retry_at = scan_at = scan_started_at = 0;
     retry_ms = 1000;
     scan_round = 0;
@@ -148,8 +155,13 @@ static void reset_test_state(void)
     memset(scan_records, 0, sizeof scan_records);
     ap_list_allocated = false;
     scan_starts = scan_stops = record_reads = list_clears = 0;
+    disconnect_calls = connect_calls = 0;
+    connect_result = ESP_OK;
     start_result = stop_result = records_result = clear_result = ESP_OK;
+    phymode_result = ESP_FAIL;
+    phymode_value = WIFI_PHY_MODE_HT20;
     event_status = 0;
+    timer_us = 0;
 }
 
 static void finish_scan(uint32_t status, uint64_t now)
@@ -203,17 +215,19 @@ esp_err_t esp_wifi_clear_ap_list(void)
 
 uint64_t esp_timer_get_time(void)
 {
-    return 0;
+    return timer_us;
 }
 
 esp_err_t esp_wifi_sta_get_negotiated_phymode(wifi_phy_mode_t *mode)
 {
-    (void)mode;
-    return ESP_FAIL;
+    if (phymode_result == ESP_OK)
+        *mode = phymode_value;
+    return phymode_result;
 }
 
 esp_err_t esp_wifi_disconnect(void)
 {
+    disconnect_calls++;
     return ESP_OK;
 }
 
@@ -321,6 +335,124 @@ static void test_five_successful_rounds_do_not_clear_twice(void)
     assert(list_clears == 0);
 }
 
+static void test_non_he20_link_is_rejected_before_dhcp(void)
+{
+    reset_test_state();
+    timer_us = 1000000;
+    phymode_result = ESP_OK;
+    phymode_value = WIFI_PHY_MODE_HT20;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    assert(associated);
+    assert(!ready);
+    assert(disconnect_calls == 1);
+
+    wifi_event_sta_disconnected_t disconnected = {.reason = 201};
+    timer_us = 2000000;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    assert(!associated);
+    assert(retry_at == 32000);
+    tb_wifi_tick(31999);
+    assert(connect_calls == 0);
+    tb_wifi_tick(32000);
+    assert(connect_calls == 1);
+    assert(retry_at == 0);
+    tb_wifi_tick(62000);
+    assert(connect_calls == 1);
+
+    timer_us = 62000000;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    assert(retry_at == 92000);
+    tb_wifi_tick(92000);
+    assert(connect_calls == 2);
+    assert(retry_at == 0);
+}
+
+static void test_associated_sta_without_dhcp_retries_after_deadline(void)
+{
+    reset_test_state();
+    timer_us = 1000000;
+    phymode_result = ESP_OK;
+    phymode_value = WIFI_PHY_MODE_HE20;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    assert(associated && !ready);
+    assert(disconnect_calls == 0);
+
+    tb_wifi_tick(10999);
+    assert(disconnect_calls == 0);
+    tb_wifi_tick(11000);
+    assert(!associated && !ready);
+    assert(disconnect_calls == 1);
+    assert(retry_at == 12000);
+
+    wifi_event_sta_disconnected_t disconnected = {.reason = 201};
+    timer_us = 11000000;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    tb_wifi_tick(11999);
+    assert(connect_calls == 0);
+    tb_wifi_tick(12000);
+    assert(connect_calls == 1);
+    assert(retry_at == 0);
+    assert(retry_ms == 2000);
+    tb_wifi_tick(13999);
+    assert(connect_calls == 1);
+    timer_us = 12000000;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    assert(retry_at == 14000);
+    assert(retry_ms == 4000);
+    tb_wifi_tick(14000);
+    assert(connect_calls == 2);
+    assert(retry_at == 0);
+    tb_wifi_tick(18000);
+    assert(connect_calls == 2);
+}
+
+static void test_immediate_connect_error_uses_backoff(void)
+{
+    reset_test_state();
+    retry_at = 1000;
+    connect_result = ESP_FAIL;
+    tb_wifi_tick(1000);
+    assert(connect_calls == 1);
+    assert(retry_at == 2000);
+    assert(retry_ms == 2000);
+    tb_wifi_tick(1999);
+    assert(connect_calls == 1);
+    connect_result = ESP_OK;
+    tb_wifi_tick(2000);
+    assert(connect_calls == 2);
+    assert(retry_at == 0);
+    tb_wifi_tick(4000);
+    assert(connect_calls == 2);
+}
+
+static void test_connect_in_progress_does_not_repeat_request(void)
+{
+    reset_test_state();
+    retry_at = 1000;
+    connect_result = ESP_ERR_WIFI_CONN;
+    tb_wifi_tick(1000);
+    assert(connect_calls == 1);
+    assert(retry_at == 0);
+    tb_wifi_tick(31000);
+    assert(connect_calls == 1);
+}
+
+static void test_he20_ip_cancels_association_timeout(void)
+{
+    reset_test_state();
+    timer_us = 1000000;
+    phymode_result = ESP_OK;
+    phymode_value = WIFI_PHY_MODE_HE20;
+    event(NULL, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    ip_event_got_ip_t got_ip = {.ip_info = {.ip = {.addr = 0x0100007f}}};
+    timer_us = 3000000;
+    event(NULL, IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip);
+    assert(ready);
+    tb_wifi_tick(11000);
+    assert(ready);
+    assert(disconnect_calls == 0);
+}
+
 int main(void)
 {
     test_get_records_failure_clears_list();
@@ -329,5 +461,10 @@ int main(void)
     test_timeout_stop_failure_preserves_scan();
     test_start_failure_does_not_clear_unallocated_list();
     test_five_successful_rounds_do_not_clear_twice();
+    test_non_he20_link_is_rejected_before_dhcp();
+    test_associated_sta_without_dhcp_retries_after_deadline();
+    test_immediate_connect_error_uses_backoff();
+    test_connect_in_progress_does_not_repeat_request();
+    test_he20_ip_cancels_association_timeout();
     return 0;
 }

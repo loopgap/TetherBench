@@ -10,10 +10,12 @@
 #include <stdio.h>
 #include <string.h>
 
-static bool ready, scanning, scan_done, scan_failed, scanned;
+static bool ready, associated, scanning, scan_done, scan_failed, scanned;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
-static uint64_t retry_at, scan_at, scan_started_at;
+static uint64_t retry_at, associated_at, scan_at, scan_started_at;
 static unsigned retry_ms = 1000;
+#define STA_DHCP_TIMEOUT_MS 10000u
+#define STA_RETRY_MAX_MS 30000u
 static uint8_t scan_round;
 static size_t scan_count;
 static struct tb_scan_ap scan_records[16];
@@ -27,17 +29,47 @@ static void clear_scan_list(const char *reason)
         ESP_LOGW("wifi", "%s AP list cleanup failed (%d)", reason, (int)err);
 }
 
+static void schedule_retry_locked(uint64_t now)
+{
+    retry_at = now + retry_ms;
+    if (retry_ms < STA_RETRY_MAX_MS)
+        retry_ms = retry_ms * 2 > STA_RETRY_MAX_MS ? STA_RETRY_MAX_MS : retry_ms * 2;
+}
+
 static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED && !TB_WIFI_AP) {
+        wifi_phy_mode_t mode;
+        bool he20 = esp_wifi_sta_get_negotiated_phymode(&mode) == ESP_OK && mode == WIFI_PHY_MODE_HE20;
+        uint64_t now = (uint64_t)esp_timer_get_time() / 1000;
         portENTER_CRITICAL(&state_lock);
         ready = false;
+        associated = true;
+        associated_at = now;
+        retry_at = 0;
         ip[0] = 0;
-        retry_at = (uint64_t)esp_timer_get_time() / 1000 + retry_ms;
-        unsigned wait = retry_ms;
-        if (retry_ms < 30000)
-            retry_ms = retry_ms * 2 > 30000 ? 30000 : retry_ms * 2;
+        if (!he20)
+            retry_ms = 30000;
+        portEXIT_CRITICAL(&state_lock);
+        if (!he20) {
+            ESP_LOGE("wifi", "Access point did not negotiate Wi-Fi 6; connection rejected");
+            esp_wifi_disconnect();
+        }
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        uint64_t now = (uint64_t)esp_timer_get_time() / 1000;
+        portENTER_CRITICAL(&state_lock);
+        ready = false;
+        associated = false;
+        associated_at = 0;
+        ip[0] = 0;
+        unsigned wait;
+        if (retry_at > now)
+            wait = (unsigned)(retry_at - now);
+        else {
+            wait = retry_ms;
+            schedule_retry_locked(now);
+        }
         portEXIT_CRITICAL(&state_lock);
         ESP_LOGW("wifi", "Disconnected (reason=%u); retry after %u ms", ((wifi_event_sta_disconnected_t *)data)->reason,
                  wait);
@@ -55,6 +87,8 @@ static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
         char address[16];
         snprintf(address, sizeof address, IPSTR, IP2STR(&got->ip_info.ip));
         portENTER_CRITICAL(&state_lock);
+        associated = true;
+        associated_at = 0;
         memcpy(ip, address, sizeof ip);
         ready = true;
         retry_ms = 1000;
@@ -175,9 +209,18 @@ static esp_err_t start_scan(void)
 void tb_wifi_tick(uint64_t now)
 {
     portENTER_CRITICAL(&state_lock);
+    bool dhcp_timeout =
+        !TB_WIFI_AP && associated && !ready && now >= associated_at && now - associated_at >= STA_DHCP_TIMEOUT_MS;
+    if (dhcp_timeout) {
+        associated = false;
+        associated_at = 0;
+        if (retry_at <= now) {
+            schedule_retry_locked(now);
+        }
+    }
     bool retry = !TB_WIFI_AP && !ready && retry_at && now >= retry_at && !scanning;
     if (retry)
-        retry_at = now + 30000;
+        retry_at = 0;
     bool timed_out = scanning && !scan_done && now >= scan_started_at && now - scan_started_at > 5000;
     if (timed_out)
         scan_started_at = now;
@@ -188,6 +231,10 @@ void tb_wifi_tick(uint64_t now)
         scan_failed = false;
     }
     portEXIT_CRITICAL(&state_lock);
+    if (dhcp_timeout) {
+        ESP_LOGW("wifi", "STA association did not obtain an IP within %u ms; retry scheduled", STA_DHCP_TIMEOUT_MS);
+        esp_wifi_disconnect();
+    }
     if (timed_out) {
         esp_err_t err = esp_wifi_scan_stop();
         if (err == ESP_OK) {
@@ -247,8 +294,18 @@ void tb_wifi_tick(uint64_t now)
             }
         }
     }
-    if (retry)
-        esp_wifi_connect();
+    if (retry) {
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            ESP_LOGW("wifi", "Retry connect request failed (%d)", (int)err);
+            if (err != ESP_ERR_WIFI_CONN) {
+                portENTER_CRITICAL(&state_lock);
+                if (!ready && !associated && !retry_at)
+                    schedule_retry_locked(now);
+                portEXIT_CRITICAL(&state_lock);
+            }
+        }
+    }
 }
 bool tb_wifi_ready(void)
 {
