@@ -1,6 +1,6 @@
-idf_component_register(SRCS "main.c" "bridge_frame.c"
+idf_component_register(SRCS "main.c" "bridge_frame.c" "bridge_link.c"
     INCLUDE_DIRS "."
-    REQUIRES esp_tinyusb driver freertos esp_timer)
+    REQUIRES esp_tinyusb esp_driver_spi esp_driver_gpio freertos esp_timer)
 target_compile_features(${COMPONENT_LIB} PRIVATE c_std_11)
 
 if(TB_BRIDGE_USB_PORT STREQUAL "full")
