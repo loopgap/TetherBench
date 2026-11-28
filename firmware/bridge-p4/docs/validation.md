@@ -26,6 +26,26 @@ bootloader images. The generated `build/`, `sdkconfig`, and local component lock
 were removed after the check. This is a source/linkage check, not a flash or HIL
 result.
 
+## 2026-11-28 flash and frame smoke test
+
+`esptool` connected to COM9 and identified an ESP32-P4 revision 3.2 with MAC
+`80:f1:b2:d7:2b:b4` and a detected 16 MiB flash. The complete 16 MiB factory
+image was saved before writing. The bootloader, partition table, and application
+from commit `e786214` were written at `0x2000`, `0x8000`, and `0x10000`; each
+segment reported a verified hash.
+
+COM10 then answered the version 1 frame contract:
+
+| Request | Response | Result |
+|---|---|---|
+| `PING`, sequence `0x4321`, one-byte payload `aa` | `PING`, sequence `0x4321`, length `1`, status `OK` | passed |
+| `DAP_REQUEST`, sequence `0x4322` | `ERROR`, sequence `0x4322`, length `1`, status `LINK_OFFLINE` | fail-closed as designed |
+
+Both responses were 32 bytes with valid CRC-16/IBM. COM9 produced no response in
+a three-second request window, so the current image has no evidence of a working
+full-speed bridge endpoint. The factory-test logs and the old image backup remain
+local and ignored.
+
 ## Required gates before selecting pins or flashing
 
 1. Identify the exact WT9932P4-TINY board revision and schematic, then record

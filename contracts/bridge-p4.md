@@ -1,7 +1,9 @@
 # P4 USB Bridge Frame Contract
 
-Status: version 1 frame format implemented in `firmware/bridge-p4`; USB High-Speed,
-CMSIS-DAP v2 bulk enumeration, and the P4-to-C5 physical link remain unverified.
+Status: version 1 frame format implemented in `firmware/bridge-p4`; the live COM10
+PING/error smoke test passes after flashing the identified ESP32-P4 board. USB
+High-Speed descriptors, CMSIS-DAP v2 bulk interoperability, COM9 full-speed
+transport, and the P4-to-C5 physical link remain unverified.
 
 This contract is independent of the pure C5 wireless route. A host must not infer
 that a successful C5 RPC or Wi-Fi test proves P4 USB behavior.
