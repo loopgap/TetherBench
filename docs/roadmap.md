@@ -15,7 +15,7 @@
 ## 当前未解决的阻塞
 
 - 本机没有 Go、OpenOCD 或 STM32 硬件工具链；ESP-IDF v6.1.1 已安装并完成 C5 构建。
-- 没有确认具体 C5/P4 板卡和电气设计，不能给出引脚、SWD 时钟或 USB High-Speed 声明。
+- 已根据用户确认和 Wireless-Tag 官方资料建立 C5/P4 TINY 板级 profile，可以按 profile 接线；P4/P4X 丝印、连续性、SWD 波形、SPI 错误率和 USB High-Speed 仍未完成实机验收，因此不能把 profile 当作硬件通过声明。
 - 仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人仍未验证；`gh` 已认证为 `loopgap`，但 main 仍等待硬件验收，因此不推送远端。
 - 设备配对、远端身份、TLS、升级密钥和 STM32 Bootloader 安全模型仍需决策。
 

@@ -62,3 +62,10 @@ service until a separate multi-stack implementation and descriptor evidence exis
 The P4 route still needs independent evidence for USB enumeration, High-Speed
 throughput, CMSIS-DAP v2 interoperability, C5 transport, SWD transactions,
 target-MCU OTA, interruption recovery, and power-loss recovery.
+
+The provisional Wireless-Tag Tiny wiring profile is recorded in
+[`contracts/wt-tiny-pin-profile.md`](wt-tiny-pin-profile.md). It uses P4
+GPIO16..21 and C5 GPIO0/1/8/9/24 plus the C5 `EN` reset input. The profile is
+not hardware acceptance evidence until the exact P4/P4X marking, reset levels,
+SPI-slave implementation, and frame error rate have been checked on the two
+boards.

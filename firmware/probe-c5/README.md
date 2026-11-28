@@ -2,9 +2,9 @@
 
 共享 ESP32-C5 N4 固件使用 ESP-IDF 6.1.1 组件构建，版本读取根目录 `VERSION`。已实现 TLS 二进制 RPC、UDP 发现、独占租约、可配置 SWD/UART/SPI/I2C、官方 Arm CMSIS-DAP 核心、签名双槽 OTA，以及外部 MCU 的 UART/SPI OTA 转发与恢复锁。Gateway 已实现双 STA 共同信道测量与协调；C5 AP+STA 协商、目标 MCU bootloader 闭环和真实 USB 枚举尚未完成。
 
-跨工程入口：[C5 契约](../../contracts/probe-c5.md)。详细字段和恢复行为：[协议](docs/protocol.md)。编程及格式规范：[C5 编程规范](docs/coding-standards.md)。验证结果：[验收记录](docs/validation.md)。第三方版本及补丁：[CMSIS-DAP 来源](third_party/CMSIS-DAP/UPSTREAM.md)。
+跨工程入口：[C5 契约](../../contracts/probe-c5.md)。详细字段和恢复行为：[协议](docs/protocol.md)。Wireless-Tag TINY 排针与 P4/SWD 接线：[板级引脚配置](../../contracts/wt-tiny-pin-profile.md)。编程及格式规范：[C5 编程规范](docs/coding-standards.md)。验证结果：[验收记录](docs/validation.md)。第三方版本及补丁：[CMSIS-DAP 来源](third_party/CMSIS-DAP/UPSTREAM.md)。
 
-`main/` 仅保留 ESP-IDF 应用入口；`components/` 按核心协议、Wi-Fi、总线、CMSIS-DAP、C5 OTA 和 RPC 装配分层，每个组件自行声明依赖；`third_party/` 保存固定上游源码；`tools/`、`tests/` 和 `docs/` 分别保存工程工具、回归和契约记录。`.local/` 的凭据、私钥、Flash 备份和本机配置，以及 `build/` 的编译输出均不提交。N4 只表示 4 MiB Flash，没有确认具体开发板外部电路；默认不分配目标引脚。
+`main/` 仅保留 ESP-IDF 应用入口；`components/` 按核心协议、Wi-Fi、总线、CMSIS-DAP、C5 OTA 和 RPC 装配分层，每个组件自行声明依赖；`third_party/` 保存固定上游源码；`tools/`、`tests/` 和 `docs/` 分别保存工程工具、回归和契约记录。`.local/` 的凭据、私钥、Flash 备份和本机配置，以及 `build/` 的编译输出均不提交。当前板卡按 `WT9932C5-TINY` N4 profile 管理，默认仍不映射目标引脚；实际排针位置和互斥的 P4/SWD profile 以[板级引脚配置](../../contracts/wt-tiny-pin-profile.md)为准，实机连续性和波形仍待验收。
 
 STA 模式先读取并启动 Windows 已配置的热点，再生成本机凭据和构建。AP 模式直接运行 `provision.py --ap`，不要求热点配置。WinRT 热点脚本需要 Windows PowerShell 5；路径是 2026-11-26 本机确认值，其他机器通过脚本参数指定环境：
 
