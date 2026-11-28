@@ -43,8 +43,15 @@ COM10 then answered the version 1 frame contract:
 
 Both responses were 32 bytes with valid CRC-16/IBM. COM9 produced no response in
 a three-second request window, so the current image has no evidence of a working
-full-speed bridge endpoint. The factory-test logs and the old image backup remain
-local and ignored.
+full-speed bridge endpoint. The source now supports `tools/build.ps1 -UsbPort
+full` and `-UsbPort high`; these profiles must be flashed and tested separately
+because the ESP-IDF TinyUSB device stack installs one peripheral per image. The
+The full-speed profile built and flashed with verified segment hashes, but COM9
+still returned no PING and COM10 disappeared while that profile was installed.
+The high-speed profile was then rebuilt, flashed, and rechecked: COM10 returned a
+valid PING response again. The board is therefore left on the high-speed image;
+COM9 requires a board-level FS/VBUS/connector investigation before it can be
+accepted. The factory-test logs and the old image backup remain local and ignored.
 
 ## Required gates before selecting pins or flashing
 

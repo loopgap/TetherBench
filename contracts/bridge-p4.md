@@ -54,6 +54,11 @@ reports `factory_test_dut`; it is not bridge evidence either. The captured
 read-only evidence is kept in
 [`firmware/bridge-p4/docs/validation.md`](../firmware/bridge-p4/docs/validation.md).
 
+The ESP-IDF TinyUSB device stack binds one peripheral per image. The bridge
+therefore uses explicit `high` and `full` build profiles to validate COM10 and
+COM9 sequentially; a profile must not be described as simultaneous dual-port
+service until a separate multi-stack implementation and descriptor evidence exist.
+
 The P4 route still needs independent evidence for USB enumeration, High-Speed
 throughput, CMSIS-DAP v2 interoperability, C5 transport, SWD transactions,
 target-MCU OTA, interruption recovery, and power-loss recovery.

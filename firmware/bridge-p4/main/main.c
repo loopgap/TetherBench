@@ -52,6 +52,11 @@ void app_main(void)
     request_queue = xQueueCreate(4, sizeof(struct tb_bridge_frame));
     if (!request_queue) return;
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+#if defined(TB_BRIDGE_USB_FULL_SPEED)
+    tusb_cfg.port = TINYUSB_PORT_FULL_SPEED_0;
+#else
+    tusb_cfg.port = TINYUSB_PORT_HIGH_SPEED_0;
+#endif
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
     ESP_ERROR_CHECK(tinyusb_cdcacm_init(&(tinyusb_config_cdcacm_t){
         .cdc_port = TINYUSB_CDC_ACM_0, .callback_rx = cdc_rx}));
