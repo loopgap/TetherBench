@@ -46,6 +46,15 @@ class ProvisionTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 provision.validate_wifi(ssid, password)
 
+    def test_wt_tiny_profile_keeps_only_documented_gpio_mask(self):
+        with tempfile.TemporaryDirectory() as folder:
+            local = pathlib.Path(folder)
+            with contextlib.redirect_stdout(io.StringIO()):
+                provision.provision(local, use_ap=True)
+            config = (local / "device_config.h").read_text(encoding="utf-8")
+            mask = sum(1 << pin for pin in (0, 1, 8, 9, 10, 24))
+            self.assertIn(f"#define TB_ALLOWED_GPIO_MASK {mask}u", config)
+
 
 if __name__ == "__main__":
     unittest.main()

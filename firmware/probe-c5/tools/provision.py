@@ -75,8 +75,9 @@ def provision(local=LOCAL, wifi_path=None, use_ap=False):
     device_file.write_text(json.dumps(device, indent=2) + "\n", encoding="utf-8")
     signer = serialization.load_pem_private_key((local / "update.key").read_bytes(), None)
     public = signer.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
-    # The board mask excludes flash, USB, UART0 and conservative boot restrictions.
-    allowed = sum(1 << p for p in (0, 1, 2, 3, 4, 5, 6, 10, 15, 23))
+    # WT9932C5-TINY profile: keep GPIO0/1/8/9/10/24 for the documented SPI and
+    # SWD profiles; exclude the RGB, USB, UART, flash and strap/board-reserved pins.
+    allowed = sum(1 << p for p in (0, 1, 8, 9, 10, 24))
     header = ["#pragma once", "#include <stdint.h>"]
     for name, value in (("TB_WIFI_SSID", active_network["ssid"].encode()),
                         ("TB_WIFI_PASSWORD", active_network["password"].encode()),
