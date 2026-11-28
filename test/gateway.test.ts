@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { after, before, describe, it } from 'node:test';
-import type { Server } from 'node:http';
+import type { ClientRequest, IncomingMessage, Server } from 'node:http';
 import { createGatewayServer } from '../apps/gateway/server.ts';
 
 const vectors = JSON.parse(await readFile(new URL('../contracts/test-vectors/mock-gateway.json', import.meta.url), 'utf8')) as {
@@ -114,25 +114,30 @@ describe('local Gateway prototype', () => {
     });
     const acquired = await api('/api/v1/devices/' + registered.body.id + '/sessions', { method: 'POST' });
     const path = '/api/v1/sessions/' + acquired.body.id + '/exchange';
-    const requestStarted = new Promise((resolve) => {
-      const observe = (request) => {
-        if (request.url === path) { server.off('request', observe); resolve(); }
+    const activeServer = server;
+    if (!activeServer) throw new Error('Gateway server was not started.');
+    const requestStarted = new Promise<void>((resolve) => {
+      const observe = (request: IncomingMessage) => {
+        if (request.url === path) { activeServer.off('request', observe); resolve(); }
       };
-      server.on('request', observe);
+      activeServer.on('request', observe);
     });
-    let pendingRequest;
-    const responsePromise = new Promise((resolve, reject) => {
-      pendingRequest = httpRequest(new URL(path, baseUrl), {
+    let pendingRequest: ClientRequest | undefined;
+    const responsePromise = new Promise<IncomingMessage>((resolve, reject) => {
+      const request = httpRequest(new URL(path, baseUrl), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
       }, resolve);
-      pendingRequest.on('error', reject);
-      pendingRequest.write('{"data":"partial');
+      pendingRequest = request;
+      request.on('error', reject);
+      request.write('{"data":"partial');
     });
 
     try {
       await requestStarted;
       await api('/api/v1/sessions/' + acquired.body.id, { method: 'DELETE' });
-      pendingRequest.end('"}');
+      const request = pendingRequest;
+      if (!request) throw new Error('Exchange request was not created.');
+      request.end('"}');
       const response = await responsePromise;
       const drained = new Promise((resolve, reject) => {
         response.once('end', resolve);
@@ -142,7 +147,7 @@ describe('local Gateway prototype', () => {
       await drained;
       assert.equal(response.statusCode, 404);
     } finally {
-      if (!pendingRequest.destroyed) pendingRequest.destroy();
+      if (pendingRequest && !pendingRequest.destroyed) pendingRequest.destroy();
       await api('/api/v1/devices/' + registered.body.id, { method: 'DELETE' });
     }
   });
