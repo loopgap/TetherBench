@@ -74,7 +74,7 @@ C5 自身 OTA、UART/SPI 目标 MCU OTA、非 IDLE 切频阶段或任何状态�
 | 3 | SPI2 | SCLK、MOSI、MISO、CS | 4 | 20 MHz，mode 0 |
 | 4 | I2C0 | SCL、SDA | 2 | 1 MHz，外部上拉 |
 
-上限不是实测速度。当前 `WT9932C5-TINY` profile 允许 GPIO0、1、8、9、10、24，避开板载 RGB、USB、UART、Flash 和启动/板级保留脚；完整排针位置、P4 互连和纯 C5 SWD 接线见 [Wireless-Tag Tiny 板级引脚配置](../../../contracts/wt-tiny-pin-profile.md)。N4 不足以证明任一脚的实测波形，默认无映射；连接前核对电平、上拉、占用与接地。没有目标供电控制。
+上限不是实测速度。当前 `WT9932C5-TINY` profile 允许 GPIO0、1、8、9、10、24，避开板载 RGB、USB、UART、Flash 和启动/板级保留脚；完整排针位置、P4 互连和纯 C5 SWD 接线见 [Wireless-Tag Tiny 板级引脚配置](../../../contracts/wt-tiny-pin-profile.md)。P4↔C5 SPI 的固定 1024 字节事务、IRQ、复位和恢复规则见共享 [P4-C5 SPI 传输契约](../../../contracts/p4-c5-spi-transport.md)。N4 不足以证明任一脚的实测波形，默认无映射；连接前核对电平、上拉、占用与接地。没有目标供电控制。
 
 opcode 16 DAP：原生 CMSIS-DAP 请求/响应，最大 1024 字节。支持 Info、HostStatus、Connect/Disconnect、TransferConfigure、Transfer、TransferBlock、WriteABORT、Delay、ResetTarget、SWJ_Pins/Clock/Sequence、SWD_Configure/Sequence、最多 16 条命令的 ExecuteCommands。Transfer 和 TransferBlock 最多 255 项，并按 1024 字节的实际请求、响应预算进一步限制；例如 block-read 最多 255 个字，block-write 最多 254 个字。Sequence 最多 64 组。TransferConfigure 的 idle_cycles 为 0..32，以限制 1 kHz 时的停顿；wait_retry 和 match_retry 接受完整 u16 范围。未映射 SWD 时仅允许 Info、HostStatus、Disconnect。没有 JTAG、SWO、CMSIS UART、QueueCommands 和厂商命令。C5 本机执行 GPIO，单请求 250 ms 预算；SWD 事务重试逐次检查期限，SWD Sequence 至少每 8 个时钟检查一次。超时后关闭 SWD 并复位核心；软件预算不代替波形测量。
 

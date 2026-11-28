@@ -2,6 +2,8 @@
 
 本记录保存本轮选定板级 profile 的上游证据和本机观察。资料是接线依据，不等于本机实物已经通过连续性、波形或协议验收。
 
+用户已确认本项目使用启明云端（Wireless-Tag）TINY 板：两块 C5 为 N4/`WT9932C5-TINY`，P4 按 `WT9932P4-TINY` 工作 profile 规划。若 P4 实物丝印为 `WT9932P4X-TINY`，不得使用本记录的 P4 固件或把 revision 3.x 当作 P4 变体证据。
+
 ## C5
 
 - 官方板级页面：[WT9932C5-TINY board features](https://wiki.wireless-tag.com/docs/zh/WT9932C5-TINY/board_features.html)

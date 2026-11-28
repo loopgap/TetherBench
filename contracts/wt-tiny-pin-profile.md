@@ -1,14 +1,14 @@
 # Wireless-Tag Tiny 板级引脚配置
 
-状态：**暂定板级配置，已由官方资料交叉核对，尚未完成本机示波器/逻辑分析仪和 P4↔C5 实机事务验证**。
+状态：**暂定板级配置，用户已确认 C5 与 P4 均为启明云端（Wireless-Tag）TINY；已由官方资料交叉核对，尚未完成本机示波器/逻辑分析仪和 P4↔C5 实机事务验证**。
 
 这份配置只描述启明云端（Wireless-Tag）TINY 开发板的物理引脚和建议信号角色。它不把 COM 号、芯片 GPIO 数量或模拟器结果当作接线依据。跨工程实现必须先选择本文件中的 profile，再由设备自身执行资源和冲突校验。
 
 ## 板卡身份与资料
 
 - C5：`WT9932C5-TINY`，模块丝印为 N4，板载 CH343P，RGB 使用 GPIO6，右排针提供 GPIO24、10、9、8、7；左排针提供 GPIO0、1、2、4、5、6、13、14。官方板级资料：<https://wiki.wireless-tag.com/docs/zh/WT9932C5-TINY/board_features.html>。
-- P4：`WT9932P4-TINY` 或同排针布局的 `WT9932P4X-TINY`。官方板级资料：<https://wiki.wireless-tag.com/docs/zh/WT9932P4-TINY/board_features.html>。P4 与 P4X 的芯片版本和固件不可混用，烧录前仍需核对板上型号丝印。
-- 本机当前观察到 COM7 为 CH343 USB-UART、COM8 为 C5 原生 USB-Serial/JTAG，能确认是两颗 C5，不能单独证明排针版本。接线时按板上 `WT9932C5-TINY` 丝印和排针标签核对。
+- P4：当前工程按 `WT9932P4-TINY` 工作 profile 选脚。官方板级资料：<https://wiki.wireless-tag.com/docs/zh/WT9932P4-TINY/board_features.html>。`WT9932P4X-TINY` 与 P4 的芯片版本和固件不可混用；如果板上丝印包含 `P4X`，烧录前必须停止并切换到独立的 P4X profile。
+- 用户确认两块 C5 和 P4 均为启明云端 TINY。当前本机角色为 COM7=C5 AP、COM8=C5 从机、COM9=P4 全速 USB、COM10=P4 高速 USB；这些端口号只用于主机测试和烧录，不替代 GPIO/排针编号。
 
 ## C5 TINY 排针索引
 

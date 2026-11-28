@@ -15,7 +15,7 @@
 ## 当前未解决的阻塞
 
 - 本机没有 Go、OpenOCD 或 STM32 硬件工具链；ESP-IDF v6.1.1 已安装并完成 C5 构建。
-- 已根据用户确认和 Wireless-Tag 官方资料建立 C5/P4 TINY 板级 profile，可以按 profile 接线；P4/P4X 丝印、连续性、SWD 波形、SPI 错误率和 USB High-Speed 仍未完成实机验收，因此不能把 profile 当作硬件通过声明。
+- 已根据用户确认和 Wireless-Tag 官方资料建立 C5/P4 TINY 板级 profile，可以按 profile 接线；P4/P4X 丝印、连续性、SWD 波形、SPI 错误率和 USB High-Speed 仍未完成实机验收，因此不能把 profile 当作硬件通过声明。P4↔C5 的 1024 字节 SPI 事务规则已沉淀到 `contracts/p4-c5-spi-transport.md`；P4 的 32 字节 USB frame 到 `TBUP` 的分片和操作码映射尚未定义，DAP 继续保持离线。
 - 仓库权限、分支保护、Draft PR 和 CODEOWNERS 责任人仍未验证；`gh` 已认证为 `loopgap`，但 main 仍等待硬件验收，因此不推送远端。
 - 设备配对、远端身份、TLS、升级密钥和 STM32 Bootloader 安全模型仍需决策。
 
