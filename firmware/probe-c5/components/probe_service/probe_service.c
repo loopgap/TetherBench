@@ -3,6 +3,7 @@
 #include "probe_dap.h"
 #include "probe_io.h"
 #include "probe_ota.h"
+#include "probe_link.h"
 #include "probe_target_ota.h"
 #include "probe_wifi.h"
 #include "device_config.h"
@@ -37,6 +38,24 @@ static uint8_t response_buffer[TB_HEADER_SIZE + TB_MAX_PAYLOAD];
 static uint8_t previous_request[TB_HEADER_SIZE + TB_MAX_PAYLOAD], previous_response[TB_HEADER_SIZE + TB_MAX_PAYLOAD];
 static size_t previous_size, previous_response_size;
 static uint64_t previous_at;
+static void release_service_mutexes(void)
+{
+    if (rpc_mutex) {
+        vSemaphoreDelete(rpc_mutex);
+        rpc_mutex = NULL;
+    }
+    if (mutex) {
+        vSemaphoreDelete(mutex);
+        mutex = NULL;
+    }
+}
+static void cleanup_start_failure(httpd_handle_t server)
+{
+    if (server)
+        (void)httpd_ssl_stop(server);
+    (void)tb_probe_link_stop();
+    release_service_mutexes();
+}
 static uint64_t now_ms(void)
 {
     return (uint64_t)esp_timer_get_time() / 1000;
@@ -57,6 +76,15 @@ static enum tb_status io_busy_except(unsigned except, bool *busy)
         }
     }
     return TB_OK;
+}
+static bool link_pin_conflict(const struct tb_pins *pins)
+{
+    if (!pins)
+        return true;
+    for (unsigned i = 0; i < pins->count; i++)
+        if (tb_probe_link_uses_gpio(pins->pin[i]))
+            return true;
+    return false;
 }
 static enum tb_status end_band_lease(void)
 {
@@ -179,6 +207,8 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
             return TB_STATE;
         if (tb_target_ota_busy())
             return TB_BUSY;
+        if (tb_probe_link_active() && (pins.protocol == TB_SPI || link_pin_conflict(&pins)))
+            return TB_BUSY;
         enum tb_status status = tb_io_configure(&pins);
         if (status == TB_OK && pins.protocol == TB_SWD)
             tb_dap_configure(pins.hz);
@@ -191,11 +221,15 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
     case TB_BUS:
         if (tb_ota_busy() || tb_target_ota_busy() || band.stage != TB_BAND_IDLE)
             return TB_BUSY;
+        if (tb_probe_link_active() && f->size >= 1 && p[0] == TB_SPI)
+            return TB_BUSY;
         return tb_io_bus(p, f->size, out, size);
     case TB_TARGET_INFO: {
         if (f->size != 1 || (p[0] != TB_UART && p[0] != TB_SPI))
             return TB_INVALID;
         if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+            return TB_BUSY;
+        if (tb_probe_link_active() && p[0] == TB_SPI)
             return TB_BUSY;
         bool busy;
         enum tb_status status = io_busy_except(p[0], &busy);
@@ -209,6 +243,8 @@ static enum tb_status dispatch(const struct tb_frame *f, uint8_t *out, size_t *s
         if (f->size != 1 + TB_TARGET_MANIFEST_SIZE || (p[0] != TB_UART && p[0] != TB_SPI))
             return TB_INVALID;
         if (tb_ota_busy() || band.stage != TB_BAND_IDLE)
+            return TB_BUSY;
+        if (tb_probe_link_active() && p[0] == TB_SPI)
             return TB_BUSY;
         bool busy;
         enum tb_status status = io_busy_except(p[0], &busy);
@@ -524,15 +560,23 @@ static void discover(void *arg)
         last = now;
     }
 }
-esp_err_t tb_service_start(void)
+esp_err_t tb_service_start_with_link(enum tb_probe_link_profile profile)
 {
     if (psa_crypto_init() != PSA_SUCCESS)
         return ESP_FAIL;
     mutex = xSemaphoreCreateMutex();
     rpc_mutex = xSemaphoreCreateMutex();
-    if (!mutex || !rpc_mutex)
+    if (!mutex || !rpc_mutex) {
+        release_service_mutexes();
         return ESP_ERR_NO_MEM;
+    }
     tb_io_release();
+    esp_err_t link_status = tb_probe_link_init(&(struct tb_probe_link_config){
+        .enabled = profile != TB_PROBE_LINK_PROFILE_DISABLED, .profile = profile});
+    if (link_status != ESP_OK) {
+        release_service_mutexes();
+        return link_status;
+    }
     tb_dap_init();
     esp_err_t status = tb_ota_init();
     ota_available = status == ESP_OK;
@@ -557,17 +601,31 @@ esp_err_t tb_service_start(void)
     config.tls_handshake_timeout_ms = 5000;
     httpd_handle_t server = NULL;
     status = httpd_ssl_start(&server, &config);
-    if (status != ESP_OK)
+    if (status != ESP_OK) {
+        cleanup_start_failure(server);
         return status;
+    }
     httpd_uri_t endpoint = {.uri = "/v1/rpc", .method = HTTP_POST, .handler = rpc};
     status = httpd_register_uri_handler(server, &endpoint);
     if (status != ESP_OK) {
-        httpd_ssl_stop(server);
+        cleanup_start_failure(server);
         return status;
     }
-    if (xTaskCreate(control, "probe_control", 4096, NULL, 4, NULL) != pdPASS ||
-        xTaskCreate(discover, "probe_discovery", 3072, NULL, 3, NULL) != pdPASS)
+    TaskHandle_t control_task = NULL;
+    if (xTaskCreate(control, "probe_control", 4096, NULL, 4, &control_task) != pdPASS) {
+        cleanup_start_failure(server);
         return ESP_ERR_NO_MEM;
+    }
+    if (xTaskCreate(discover, "probe_discovery", 3072, NULL, 3, NULL) != pdPASS) {
+        vTaskDelete(control_task);
+        cleanup_start_failure(server);
+        return ESP_ERR_NO_MEM;
+    }
     ESP_LOGI("probe", "TLS RPC :443/v1/rpc; discovery UDP :4440; target pins are unassigned");
     return ESP_OK;
+}
+
+esp_err_t tb_service_start(void)
+{
+    return tb_service_start_with_link(TB_PROBE_LINK_PROFILE_DISABLED);
 }

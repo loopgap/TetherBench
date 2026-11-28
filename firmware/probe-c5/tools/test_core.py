@@ -38,6 +38,14 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
                     str(CORE / "probe_core.c"), str(ROOT / "tests/ota_test.c"),
                     "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=15)
+    link = ROOT / "components/probe_link"
+    link_stubs = ROOT / "tests/probe_link_stubs"
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+                    "-I", str(link_stubs), "-I", str(CORE / "include"),
+                    "-I", str(link / "include"), str(CORE / "probe_core.c"),
+                    str(link / "probe_link.c"), str(ROOT / "tests/probe_link_test.c"),
+                    "-o", str(executable)], check=True)
+    subprocess.run([str(executable)], check=True, timeout=15)
     vendor = ROOT / "third_party/CMSIS-DAP"
     subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Wno-unused-parameter", "-O2",
                     "-DTB_HOST_TEST", "-DTB_HOST_EXPIRE_TEST",
