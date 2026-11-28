@@ -4,6 +4,8 @@
 
 此文件是 Gateway、Probe C5、未来 Bridge/Hosted 项目访问共享 C5 的契约入口。权威字段和行为放在 [C5 协议](../firmware/probe-c5/docs/protocol.md)，本机 Gateway 的浏览器接口放在 [C5 Gateway API](c5-gateway-api.md)。实现、工具、详细文档和测试随独立 C5 工程维护。改变跨工程行为时同步修改文档、实现与调用方检查。
 
+P4 USB 桥接路线使用独立的 [P4 帧契约](bridge-p4.md)，与本文件的纯 C5 无线 RPC 验收分开计证。
+
 - TLS `POST /v1/rpc` 承载有限长度二进制帧，不使用 Gateway 的模拟 HTTP API 连接固件。
 - C5 独占其 GPIO 和总线；其他固件不得依赖它的私有源码。
 - UDP 4440 只提供定位信息，设备身份由本机预置证书确认。

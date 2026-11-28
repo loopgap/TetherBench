@@ -24,7 +24,7 @@ flowchart LR
   P4 -.-> MCU
 ```
 
-## 纯 Wi-Fi 接入（规划）
+## 纯 C5 无线探针路线
 
 Gateway 管理发现、身份、权限、会话和工具适配；探针在本机执行 CMSIS-DAP 和实时引脚操作。配对、加密、发现方式、重连及 TLS 资源预算仍未定，不能将模拟 API 当成设备链路。
 
@@ -36,9 +36,11 @@ flowchart LR
   C5 -->|本地 SWD/JTAG / UART| MCU[目标 MCU]
 ```
 
-## USB 接入（规划）
+这条路线独立验证电脑 Gateway 直接管理 C5：C5 自己执行 SWD/JTAG、UART、SPI 和 I2C 事务，电脑只承担发现、认证、租约和协议适配。双 C5 AP/STA 的关联、DHCP、HE20 和断连证据只能证明无线链路状态；RPC、DAP、目标 MCU OTA 和掉电恢复仍需在同一条路线中分别验收。
 
-P4 复合 USB 设备、CDC、CMSIS-DAP v2 Bulk、USB High-Speed 能力和目标绑定都需在明确芯片、板卡和 OS 条件下验证。电脑端 Gateway 管理通道与外部工具使用的 USB 调试通道必须最终共享目标会话，但本仓库尚未实现。
+## P4 + C5 USB 桥接路线
+
+P4 复合 USB 设备、CDC、CMSIS-DAP v2 Bulk、USB High-Speed 能力和目标绑定必须在 P4 板卡、PHY、驱动和接线明确后单独验证。电脑端 Gateway 管理通道与 USB 调试通道最终共享目标会话，但不能用纯 C5 无线结果替代这条路线的 USB、P4-C5 链路或目标事务证据。当前 `firmware/bridge-p4` 只提供有界 CDC 帧和离线安全响应骨架，未宣称 High-Speed 或 CMSIS-DAP 已通过。
 
 ```mermaid
 flowchart LR
@@ -60,7 +62,7 @@ flowchart BT
   CONSOLE[apps/console] --> CONTRACTS
   SIM[apps/simulator] --> CONTRACTS
   PROBE[firmware/probe-c5] --> CONTRACTS
-  P4[firmware/bridge-p4：规划] --> CONTRACTS
+  P4[firmware/bridge-p4：独立 USB 桥接工程] --> CONTRACTS
   HOSTED[firmware/hosted-c5：规划] --> CONTRACTS
   MCU[firmware/targets/stm32f405：规划] --> CONTRACTS
 ```
