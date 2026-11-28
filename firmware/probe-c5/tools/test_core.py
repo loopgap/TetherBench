@@ -51,3 +51,4 @@ with tempfile.TemporaryDirectory(prefix="tetherbench-core-") as folder:
     subprocess.run([sys.executable, str(ROOT / "tests/test_service_policy.py")], check=True, timeout=15)
     subprocess.run([sys.executable, str(ROOT / "tests/test_hil_preflight.py")], check=True, timeout=15)
     subprocess.run([sys.executable, str(ROOT / "tests/test_two_c5_link.py")], check=True, timeout=15)
+    subprocess.run([sys.executable, str(ROOT / "tests/test_two_c5_hil.py")], check=True, timeout=15)

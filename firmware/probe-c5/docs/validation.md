@@ -49,6 +49,8 @@
 | 2026-11-27 IO 组件边界与 HIL 安全前置 | `probe_io.h` 不再导出可变引脚表或 GPIO 寄存器操作；跨组件读取经校验后复制配置，SWD 快速内联接口仅供 IO/DAP 内部使用。HIL 在获取租约前验证 INFO、48 字节 CONFIG 和 28 字节 C5 OTA 状态，活动租约、已映射引脚、未完成事务或异常状态都会中止。主机核心测试通过、Python 17/17、`npm run check` 9/9、clang-format 与 `git diff --check` 通过。ESP-IDF 6.1.1 镜像 0x120cd0 字节，最小 OTA 槽余 0xbf330 字节（40%）。COM7 烧录哈希校验通过；20 秒串口确认 IDF 6.1.1、4 MiB Flash、应用、TLS RPC 443 与 UDP 4440 启动，无新 panic。STA 报 `reason=201` 且发现为空，本次未运行 HIL；真实 SWD、GPIO 电气与目标总线仍未验收。 |
 | 2026-11-27 Wi-Fi 扫描资源回收 | 扫描失败事件与 `esp_wifi_scan_get_ap_records()` 失败后显式清除驱动 AP 列表；超时只在 `esp_wifi_scan_stop()` 成功后清理，停止失败则保留扫描状态等待完成事件。新增主机 API 替身回归，覆盖读取失败、失败事件、超时停止成功/失败、启动失败和五轮正常扫描。`python firmware/probe-c5/tools/test_core.py` 通过（核心、目标链路、OTA 替身、DAP 边界及 pyOCD 传输测试）；`cmake --build build` 用现有 ESP-IDF v6.1.1 配置构建通过，镜像 0x120f80 字节，OTA 槽余 0xbf080 字节（40%）。PowerShell 的 IDF export 因工具注册数据未识别已安装工具而失败，因此本次复用既有 IDF CMake/Ninja 配置直接构建；未烧录或运行无线 HIL。 |
 
+| 2026-11-28 双 C5 只读 HIL 复核 | `tools/hil_two_c5.py --ap-port COM7 --sta-port COM8 --seconds 60` 在不复位、不烧录条件下同时打开两路串口并保留日志；两份新日志均为 0 字节，严格校验失败：缺少新的 AP 侧 802.11ax/20 MHz 关联事件。端口失败、截止时间和空采集回归已接入 `tools/test_core.py`，6 项 Python 测试通过。该结果只说明当前运行态没有可用的新链路证据，不能替代纯 C5 应用层 RPC/DAP/OTA HIL。 |
+
 构建日志、串口原始日志、本机凭据在忽略提交的 `.local/`。协议与可复现工具留在源码目录。不得提交私钥、密码或原始 Flash。
 
 本机无线适配器为 RZ608 Wi-Fi 6E 80MHz，但客户端支持 11ax 不代表 Windows 热点以 11ax 提供服务。没有静默降级到 11n，也没有把 TLS 服务启动日志当作无线端到端通过。当前仅保留本地 main 基线，完整验收前不推送远端。
